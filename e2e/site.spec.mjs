@@ -16,7 +16,20 @@ test('the page loads with its title, share card and no errors', async ({ page })
     'https://www.playbythesandbox.ca/api/og?v=2',
   );
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://playbythesandbox.ca/');
-  await page.waitForLoadState('networkidle');
+  // Wait for everything the page fetches: the load event, the web fonts, the
+  // hero's first frame and the projector slide art. Not 'networkidle': the
+  // WebGL scene keeps the renderer busy enough on CI's software GPU that
+  // Chromium can go 30 s without reporting it.
+  await page.waitForLoadState('load');
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator('#heroScene')).toHaveClass(/ready/);
+  await page.waitForFunction(() =>
+    /** @type {PerformanceResourceTiming[]} */ (performance.getEntriesByType('resource')).some(
+      (r) => r.name.endsWith('/logo.svg') && r.responseEnd > 0,
+    ),
+  );
+  // Give the slide's onload redraw the same quiet half second networkidle used to.
+  await page.waitForTimeout(500);
   expect(errors).toEqual([]);
 });
 
