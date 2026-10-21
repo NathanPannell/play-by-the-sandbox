@@ -37,12 +37,17 @@ test('the wordmark draws itself in, then wiggles and boils', async ({ page }) =>
     )
     .toMatch(/^0(px)?$/);
   // The outline boils: the turbulence seed steps a few times a second.
-  const seen = new Set();
-  for (let i = 0; i < 6; i++) {
-    seen.add(await seed(page));
-    await page.waitForTimeout(160);
-  }
-  expect(seen.size).toBeGreaterThan(2);
+  const first = await seed(page);
+  await expect.poll(() => seed(page), { timeout: 5000 }).not.toBe(first);
+});
+
+test('the boil rests while the header is scrolled away', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#wishlist').scrollIntoViewIfNeeded();
+  await page.waitForTimeout(300);
+  const resting = await seed(page);
+  await page.waitForTimeout(600);
+  expect(await seed(page)).toBe(resting);
 });
 
 test('the wordmark holds still, fully drawn, for reduced motion', async ({ page }) => {
