@@ -55,6 +55,30 @@ test('the scene stops drawing when scrolled away or when the tab is hidden', asy
   await expect(scene).toHaveAttribute('data-state', 'paused');
 });
 
+test('a lost GPU context shows the poster, then the scene comes back', async ({ page }) => {
+  await page.goto('/');
+  const scene = page.locator('#heroScene');
+  await expect(scene).toHaveAttribute('data-state', 'running');
+
+  await page.evaluate(() => {
+    const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector('#heroScene canvas'));
+    const ext = canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context');
+    /** @type {any} */ (window).loseContext = ext;
+    ext?.loseContext();
+  });
+  await expect(scene).toHaveAttribute('data-state', 'fallback');
+  await expect(scene).not.toHaveClass(/ready/);
+  // Scrolling or tab switches while the context is gone don't restart the loop.
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await expect(scene).toHaveAttribute('data-state', 'fallback');
+
+  await page.evaluate(() => /** @type {any} */ (window).loseContext.restoreContext());
+  await expect(scene).toHaveAttribute('data-state', 'running');
+  await expect(scene).toHaveClass(/ready/);
+  const restored = await frames(page);
+  await expect.poll(() => frames(page), { timeout: 15000 }).toBeGreaterThan(restored + 2);
+});
+
 test('reduced motion gets one still crayon frame', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/');
@@ -62,8 +86,16 @@ test('reduced motion gets one still crayon frame', async ({ page }) => {
   await expect(scene).toHaveAttribute('data-state', 'static');
   await expect(scene).toHaveClass(/ready/);
   // The still is redrawn when the fonts and the projector's slides arrive, then never again.
-  await page.evaluate(() => document.fonts.ready);
-  await page.waitForTimeout(800);
+  await expect
+    .poll(
+      async () => {
+        const before = await frames(page);
+        await page.waitForTimeout(1000);
+        return (await frames(page)) === before;
+      },
+      { timeout: 20000 },
+    )
+    .toBe(true);
   const still = await frames(page);
   expect(still).toBeGreaterThan(0);
   expect(still).toBeLessThanOrEqual(6);

@@ -35,7 +35,7 @@ function start(root) {
   /** @type {WebGLRenderer} */
   let renderer;
   try {
-    renderer = new WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
+    renderer = new WebGLRenderer({ antialias: false });
   } catch {
     return setState('fallback');
   }
@@ -61,10 +61,11 @@ function start(root) {
   let raf = 0;
   let tick = 0;
   let frames = 0;
+  let lost = false;
 
   const ads = adTexture(() => {
-    // Only once the scene exists; the first paint happens during setup.
-    if (mode === 'static' && frames) draw(STILL_T);
+    // Redraw a held frame with the slides; the first paint happens during setup, before the scene exists.
+    if (frames && !lost && mode !== 'running') draw(mode === 'static' ? STILL_T : t);
   });
   const world = buildScene(quality, { adTexture: ads });
   const target = new WebGLRenderTarget(1, 1, {
@@ -88,7 +89,7 @@ function start(root) {
     renderer.setRenderTarget(null);
     renderer.render(crayon.scene, crayon.camera);
     canvas.dataset.frames = String(++frames);
-    if (frames === 1) root.classList.add('ready');
+    root.classList.add('ready');
   }
 
   function resize() {
@@ -116,6 +117,7 @@ function start(root) {
   }
 
   function schedule() {
+    if (lost) return;
     const want = reduced.matches ? 'static' : !document.hidden && onScreen ? 'running' : 'paused';
     if (want === mode && (want !== 'running' || raf)) return setState(mode);
     cancelAnimationFrame(raf);
@@ -137,10 +139,19 @@ function start(root) {
   }).observe(root);
   document.addEventListener('visibilitychange', schedule);
   reduced.addEventListener('change', schedule);
+  // Show the poster while the GPU context is gone; three.js restores it, then we pick up again.
   canvas.addEventListener('webglcontextlost', () => {
+    lost = true;
     cancelAnimationFrame(raf);
+    raf = 0;
+    mode = 'paused';
     root.classList.remove('ready');
     setState('fallback');
+  });
+  canvas.addEventListener('webglcontextrestored', () => {
+    lost = false;
+    resize();
+    schedule();
   });
 
   resize();
@@ -149,7 +160,10 @@ function start(root) {
 
 function supportsWebGL2() {
   try {
-    return !!document.createElement('canvas').getContext('webgl2');
+    const gl = document.createElement('canvas').getContext('webgl2');
+    // Hand the probe's context slot straight back.
+    gl?.getExtension('WEBGL_lose_context')?.loseContext();
+    return !!gl;
   } catch {
     return false;
   }
