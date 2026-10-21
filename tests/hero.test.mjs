@@ -1,4 +1,4 @@
-import { Color, DataTexture, InstancedMesh, Mesh, Texture } from 'three';
+import { Color, DataTexture, InstancedMesh, Mesh, OneFactor, Texture, ZeroFactor } from 'three';
 import { describe, expect, it } from 'vitest';
 import { BOIL_FPS, createCrayonPass } from '../src/hero/crayon.js';
 import { bulbLayout } from '../src/hero/marquee.js';
@@ -192,10 +192,27 @@ describe('scene', () => {
     for (let i = 0; i < letters.count; i++) expect(letters.getColorAt(i, yellow).getHexString()).toBe('ffc93a');
   });
 
-  it('marks glowing pixels with zero alpha for the crayon pass', () => {
-    const material = glowMaterial();
-    expect(material.fragmentShader).toContain('gl_FragColor = vec4(vColor, 0.0)');
-    expect(material.vertexShader).toContain('instanceMatrix');
+  it('marks glowing pixels with zero alpha for the crayon pass, and nothing else', () => {
+    const glow = glowMaterial();
+    expect(glow.userData.glow).toBe(true);
+    expect(glow.fragmentShader).toMatch(/gl_FragColor\s*=\s*vec4\(\s*vColor\s*,\s*0\.0\s*\)/);
+    // Instancing is optional, so the material also works on a plain mesh.
+    expect(glow.vertexShader).toMatch(/#ifdef USE_INSTANCING/);
+
+    // Every other material must leave alpha at 1: opaque, or additive light
+    // that keeps the destination alpha.
+    for (const quality of [desktop, phone]) {
+      buildScene(quality).scene.traverse((o) => {
+        const material = /** @type {import('three').Material | undefined} */ (/** @type {Mesh} */ (o).material);
+        if (!material || material.userData.glow) return;
+        expect(
+          material.opacity === 1 || (material.blendSrcAlpha === ZeroFactor && material.blendDstAlpha === OneFactor),
+          o.type,
+        ).toBe(true);
+        if (material.transparent)
+          expect([material.blendSrcAlpha, material.blendDstAlpha]).toEqual([ZeroFactor, OneFactor]);
+      });
+    }
   });
 
   it('shows the site ads on the projector wall when given them', () => {

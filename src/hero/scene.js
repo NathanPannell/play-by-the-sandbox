@@ -8,7 +8,8 @@
 // are a handful of meshes and instanced meshes. `update(t)` is a pure function
 // of time, so a still frame at a given t always looks the same.
 import {
-  AdditiveBlending,
+  AddEquation,
+  CustomBlending,
   BackSide,
   BoxGeometry,
   BufferAttribute,
@@ -30,6 +31,9 @@ import {
   MeshBasicMaterial,
   MeshLambertMaterial,
   NoBlending,
+  ZeroFactor,
+  SrcAlphaFactor,
+  OneFactor,
   Object3D,
   PerspectiveCamera,
   PlaneGeometry,
@@ -58,6 +62,20 @@ const DOME = '#6FB3A0';
 const SKIN = ['#F4C8A0', '#E9B48A', '#C98A5B', '#8D5A3B', '#F1D2B6'];
 
 const ROAD_Z = 18.6;
+
+/**
+ * Additive light (searchlight and projector beams) that leaves the render
+ * target's alpha alone, so a beam in front of the marquee can't dim its glow
+ * (see glowMaterial).
+ */
+const LIGHT_BEAM = {
+  blending: CustomBlending,
+  blendEquation: AddEquation,
+  blendSrc: SrcAlphaFactor,
+  blendDst: OneFactor,
+  blendSrcAlpha: ZeroFactor,
+  blendDstAlpha: OneFactor,
+};
 const CYCLE = 26; // seconds for a limo to pull up, wait and leave
 
 /** @typedef {import('./quality.js').Quality} Quality */
@@ -496,10 +514,12 @@ function plaza(random) {
 /**
  * An unlit material that marks its pixels as glowing: it writes alpha 0 into
  * the render target, which the crayon pass reads as "light source" (full
- * colour, no ink, a hatched halo around it). Works on instanced meshes.
+ * colour, no ink, a hatched halo around it). Every other material must write
+ * alpha 1. Works on plain and instanced meshes.
  */
 export function glowMaterial() {
   return new ShaderMaterial({
+    userData: { glow: true },
     blending: NoBlending,
     vertexShader: /* glsl */ `
       varying vec3 vColor;
@@ -508,7 +528,11 @@ export function glowMaterial() {
         #ifdef USE_INSTANCING_COLOR
           vColor = instanceColor;
         #endif
-        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+        vec4 local = vec4(position, 1.0);
+        #ifdef USE_INSTANCING
+          local = instanceMatrix * local;
+        #endif
+        gl_Position = projectionMatrix * modelViewMatrix * local;
       }`,
     fragmentShader: /* glsl */ `
       varying vec3 vColor;
@@ -662,7 +686,7 @@ function adWall(texture) {
     color: '#FFF1B8',
     transparent: true,
     opacity: 0.16,
-    blending: AdditiveBlending,
+    ...LIGHT_BEAM,
     depthWrite: false,
     side: DoubleSide,
     fog: false,
@@ -690,7 +714,7 @@ function searchlights(count) {
     color: '#FFF4C9',
     transparent: true,
     opacity: 0.1,
-    blending: AdditiveBlending,
+    ...LIGHT_BEAM,
     depthWrite: false,
     side: DoubleSide,
     fog: false,

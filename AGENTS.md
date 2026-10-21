@@ -34,6 +34,11 @@ npm run poster         # re-render the hero posters after changing the scene or 
 
 html-validate turns off three stylistic rules (`attr-quotes`, `doctype-style`, `no-inline-style`), because the page uses single-quoted attributes and inline styles throughout. Every structural rule still applies.
 
+## Header wordmark
+
+- The header's "sandbox" wordmark is the crayon-stroke SVG from `public/wordmark.svg` (the designer's file), inlined in `index.html` beside the fish icon. The purple "o" is drawn as one stroked ring instead of the file's filled circle with a white hole, so it can draw in like the other letters.
+- On load each letter draws in (`.wm-s`, the `sbDraw` keyframes). After that a stepped `wmJig` wiggle runs, and a small inline script steps the `#wmNoise` turbulence seed about 7 times a second to make the outline boil. The script stops while the tab is hidden. Under `prefers-reduced-motion` the wordmark is drawn and still.
+
 ## Hero scene
 
 - `#heroScene` holds the poster image and, once `hero.js` runs, the WebGL canvas. Its `data-state` is `poster`, `running`, `paused` (tab hidden or hero off-screen), `static` (prefers-reduced-motion: one still frame) or `fallback` (no WebGL2, so the poster stays). The canvas's `data-frames` counts rendered frames; the e2e suite reads both.
