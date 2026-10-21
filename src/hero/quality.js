@@ -1,5 +1,6 @@
-// How much scene a device gets. Phones get a smaller crowd, fewer particles and
-// 30 fps; everyone gets a device pixel ratio capped at 1.5.
+// How much scene a device gets. Phones get a smaller crowd, fewer particles,
+// 2x instead of 4x antialiasing and 30 fps; everyone gets a device pixel ratio
+// capped at 1.5.
 
 export const MAX_DPR = 1.5;
 
@@ -11,6 +12,7 @@ export const MAX_DPR = 1.5;
  *   confetti: number,
  *   searchlights: number,
  *   frameSkip: number,
+ *   msaa: number,
  * }} Quality
  */
 
@@ -22,8 +24,8 @@ export function pickQuality({ width, devicePixelRatio, coarsePointer = false }) 
   const mobile = width < 760 || (coarsePointer && width < 1100);
   const dpr = Math.min(Math.max(devicePixelRatio || 1, 1), MAX_DPR);
   return mobile
-    ? { mobile, dpr, crowd: 90, confetti: 110, searchlights: 2, frameSkip: 1 }
-    : { mobile, dpr, crowd: 230, confetti: 320, searchlights: 4, frameSkip: 0 };
+    ? { mobile, dpr, crowd: 100, confetti: 110, searchlights: 3, frameSkip: 1, msaa: 2 }
+    : { mobile, dpr, crowd: 260, confetti: 300, searchlights: 6, frameSkip: 0, msaa: 4 };
 }
 
 /** A small deterministic PRNG (mulberry32), so every visitor sees the same scene. */

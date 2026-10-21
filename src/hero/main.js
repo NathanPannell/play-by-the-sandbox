@@ -7,21 +7,19 @@
 import {
   CanvasTexture,
   DepthTexture,
-  NearestFilter,
+  LinearFilter,
   SRGBColorSpace,
   UnsignedIntType,
   WebGLRenderTarget,
   WebGLRenderer,
 } from 'three';
 import { createCrayonPass } from './crayon.js';
-import { BLUE, GREEN, INK, PAPER, PURPLE, RED, YELLOW } from './palette.js';
+import { BLUE, INK, PAPER, RED, YELLOW } from './palette.js';
 import { pickQuality } from './quality.js';
-import { buildScene } from './scene.js';
+import { STILL_T, buildScene } from './scene.js';
 
-/** The moment drawn for reduced motion and the poster: limo at the carpet, flashes going off. */
-const STILL_T = 11.2;
-/** Where the running animation starts, with a limo already rolling in. */
-const START_T = 4;
+/** Where the running animation starts: a few seconds before the view turns to face the gallery. */
+const START_T = STILL_T - 6;
 
 const root = document.getElementById('heroScene');
 if (root) start(root);
@@ -62,16 +60,21 @@ function start(root) {
   let tick = 0;
   let frames = 0;
   let lost = false;
+  let debug = false;
 
   const ads = adTexture(() => {
     // Redraw a held frame with the slides; the first paint happens during setup, before the scene exists.
     if (frames && !lost && mode !== 'running') draw(mode === 'static' ? STILL_T : t);
   });
   const world = buildScene(quality, { adTexture: ads });
+  // Multisampled, so thin things (ropes, poles, confetti, outlines) don't
+  // crawl as the camera turns; linear, because the crayon pass samples
+  // between pixels.
   const target = new WebGLRenderTarget(1, 1, {
     depthTexture: new DepthTexture(1, 1, UnsignedIntType),
-    minFilter: NearestFilter,
-    magFilter: NearestFilter,
+    samples: quality.msaa,
+    minFilter: LinearFilter,
+    magFilter: LinearFilter,
   });
   const crayon = createCrayonPass({
     color: target.texture,
@@ -80,9 +83,9 @@ function start(root) {
     far: world.camera.far,
   });
 
-  /** @param {number} t */
-  function draw(t) {
-    world.update(t);
+  /** @param {number} t @param {number} [cameraT] */
+  function draw(t, cameraT = t) {
+    world.update(t, cameraT);
     crayon.setBoil(t);
     renderer.setRenderTarget(target);
     renderer.render(world.scene, world.camera);
@@ -101,7 +104,8 @@ function start(root) {
     crayon.setSize(Math.round(w * px), Math.round(h * px), px);
     world.setAspect(w / h);
     const aspect = w / h;
-    world.setShift(Math.min(0.2, Math.max(0, (aspect - 1.1) * 0.26)), aspect < 0.8 ? 0.17 : 0);
+    // On phones the card covers the bottom of the hero, so tilt the view up over it.
+    world.setShift(0, aspect < 0.8 ? 0.08 : 0);
     if (mode === 'static' || mode === 'paused') draw(mode === 'static' ? STILL_T : t);
   }
 
@@ -117,7 +121,7 @@ function start(root) {
   }
 
   function schedule() {
-    if (lost) return;
+    if (lost || debug) return;
     const want = reduced.matches ? 'static' : !document.hidden && onScreen ? 'running' : 'paused';
     if (want === mode && (want !== 'running' || raf)) return setState(mode);
     cancelAnimationFrame(raf);
@@ -156,6 +160,21 @@ function start(root) {
 
   resize();
   schedule();
+
+  // Graphics QA (tools/flicker.mjs, e2e/hero.spec.mjs): with ?hero-debug the
+  // page exposes a way to stop the loop and draw any moment exactly.
+  if (new URLSearchParams(window.location.search).has('hero-debug')) {
+    /** @type {any} */ (window).__hero = {
+      /** @param {number} at seconds @param {number} [cameraAt] hold the camera at this time instead */
+      draw(at, cameraAt = at) {
+        debug = true;
+        cancelAnimationFrame(raf);
+        raf = 0;
+        draw(at, cameraAt);
+        return canvas;
+      },
+    };
+  }
 }
 
 function supportsWebGL2() {
@@ -171,7 +190,7 @@ function supportsWebGL2() {
 
 /**
  * The projector's slides, drawn once into a 2x2 atlas: the event name, the
- * date, the numbers and the Sandbox sun. Redrawn when the fonts arrive.
+ * date, the numbers and the wordmark. Redrawn when the fonts arrive.
  * @param {() => void} onReady
  */
 function adTexture(onReady) {
@@ -211,7 +230,7 @@ function adTexture(onReady) {
     ctx.fillText(text, x, y);
   };
 
-  const sun = new Image();
+  const mark = new Image();
   function paint() {
     if (!ctx) return;
     panel(0, YELLOW);
@@ -230,9 +249,9 @@ function adTexture(onReady) {
     toon('real ads in 3 days', W / 2, 244, 46, PAPER);
     ctx.restore();
 
-    panel(3, PURPLE);
-    if (sun.complete && sun.naturalWidth) ctx.drawImage(sun, W / 2 - 120, 24, 240, 240);
-    toon('come play!', W / 2, 276, 52, GREEN);
+    panel(3, PAPER);
+    if (mark.complete && mark.naturalWidth) ctx.drawImage(mark, W / 2 - 215, 56, 430, 98);
+    toon('come play!', W / 2, 236, 64, RED);
     ctx.restore();
 
     texture.needsUpdate = true;
@@ -240,8 +259,8 @@ function adTexture(onReady) {
   }
 
   paint();
-  sun.onload = paint;
-  sun.src = '/logo.svg';
+  mark.onload = paint;
+  mark.src = '/wordmark.svg';
   document.fonts?.load('60px Chewy').then(paint, () => {});
   return texture;
 }

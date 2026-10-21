@@ -13,7 +13,9 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
     "e2e": "playwright test",
-    "poster": "node tools/make-poster.mjs"
+    "poster": "node tools/make-poster.mjs",
+    "flicker": "node tools/flicker.mjs",
+    "icons": "node tools/make-icons.mjs"
   },
   "dependencies": {
     "@vercel/og": "0.6.8",
