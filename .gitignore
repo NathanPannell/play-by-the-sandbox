@@ -1,5 +1,10 @@
 node_modules/
+dist/
 .vercel/
 .env*
+!.env.example
+coverage/
+test-results/
+playwright-report/
 .claude/tmp/
 .codex/tmp/

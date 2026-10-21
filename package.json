@@ -1,1 +1,32 @@
-{"name":"play-by-the-sandbox","private":true,"dependencies":{"@vercel/og":"0.6.8"}}
+{
+  "name": "play-by-the-sandbox",
+  "private": true,
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "serve": "node scripts/serve.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "eslint . --max-warnings=0 && html-validate public/index.html",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --coverage",
+    "e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vercel/og": "0.6.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^24.19.2",
+    "@vitest/coverage-v8": "^5.0.5",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
+    "html-validate": "^11.17.0",
+    "prettier": "^3.9.10",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}
