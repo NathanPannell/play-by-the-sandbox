@@ -50,7 +50,9 @@ describe('GET /api/og', () => {
     const css = urls.filter((u) => u.startsWith('https://fonts.googleapis.com/'));
     expect(css).toHaveLength(2);
     expect(css[0]).toMatch(/^https:\/\/fonts\.googleapis\.com\/css2\?family=Chewy&text=/);
-    expect(decodeURIComponent(css[0])).toContain('Play by the Sandbox!');
+    // The ribbon, place and URL are set in Chewy; the wordmark is an image.
+    expect(decodeURIComponent(css[0])).toContain('Play by the');
+    expect(decodeURIComponent(css[0])).toContain('Vancouver Art Gallery');
     expect(css[1]).toMatch(/^https:\/\/fonts\.googleapis\.com\/css2\?family=Gaegu:wght@700&text=/);
     expect(urls.filter((u) => u === 'https://fonts.gstatic.com/f.ttf')).toHaveLength(2);
   });
