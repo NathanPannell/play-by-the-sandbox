@@ -1,6 +1,6 @@
 # Play by the Sandbox
 
-Event site for Play by the Sandbox, a creative event at the Vancouver Art Gallery in January 2027. It is one hand-written static page (`public/index.html`, with its CSS animations and scripts inline) plus a Vercel function, `api/og.js`, that renders the 1200x630 share card with `@vercel/og`.
+Event site for Play by the Sandbox, a creative event at the Vancouver Art Gallery in January 2027. It is one hand-written static page (`public/index.html`, with its CSS animations and scripts inline), a three.js hero scene bundled from `src/hero/` into `hero.js`, and a Vercel function, `api/og.js`, that renders the 1200x630 share card with `@vercel/og`.
 
 The repo was imported on 2026-10-21 from Vercel production deployment `dpl_HRayQz8pD3L1Yn7Q7mJfhFaHU7Vq`. Before that the site was deployed with the Vercel CLI and had no git history.
 
@@ -10,7 +10,9 @@ The repo was imported on 2026-10-21 from Vercel production deployment `dpl_HRayQ
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `public/`                   | The site, served byte for byte. Don't reformat it: whitespace in `index.html` affects inline layout and the animations. |
 | `api/og.js`                 | `GET /api/og`, the Open Graph image. Fetches Chewy and Gaegu from Google Fonts at request time.                         |
-| `scripts/build.mjs`         | Production build: copies `public/` to `dist/`.                                                                          |
+| `src/hero/`                 | The hero's 3D premiere scene (`scene.js`), the crayon post-process (`crayon.js`) and the DOM/WebGL entry (`main.js`).   |
+| `scripts/build.mjs`         | Production build: copies `public/` to `dist/`, then bundles `src/hero/main.js` with esbuild into `dist/hero.js`.        |
+| `tools/make-poster.mjs`     | `npm run poster`: renders the still crayon frame into `public/hero-poster.jpg` and `public/hero-poster-m.jpg`.          |
 | `scripts/serve.mjs`         | Serves `dist/` and `api/og` locally, the way Vercel does. Used by the e2e suite.                                        |
 | `scripts/vercel-ignore.mjs` | Vercel's ignored build step. Git deployments build only for `main` and `staging`.                                       |
 | `tests/`                    | Vitest unit tests, with a coverage floor in `vitest.config.mjs`.                                                        |
@@ -27,9 +29,18 @@ npm test               # Vitest with coverage floor
 npm run build          # dist/
 npm run e2e            # Playwright; builds and serves on 127.0.0.1:4321
 npm run build && npm run serve   # local preview
+npm run poster         # re-render the hero posters after changing the scene or the crayon pass
 ```
 
 html-validate turns off three stylistic rules (`attr-quotes`, `doctype-style`, `no-inline-style`), because the page uses single-quoted attributes and inline styles throughout. Every structural rule still applies.
+
+## Hero scene
+
+- `#heroScene` holds the poster image and, once `hero.js` runs, the WebGL canvas. Its `data-state` is `poster`, `running`, `paused` (tab hidden or hero off-screen), `static` (prefers-reduced-motion: one still frame) or `fallback` (no WebGL2, so the poster stays). The canvas's `data-frames` counts rendered frames; the e2e suite reads both.
+- The scene is a pure function of time (`update(t)`), and the reduced-motion still and the posters use the same moment, so re-running `npm run poster` after a scene change keeps them matching.
+- Phones (`pickQuality` in `src/hero/quality.js`) get a smaller crowd, fewer particles, two searchlights and about 30 fps. The device pixel ratio is capped at 1.5.
+- `three` and `esbuild` are in `dependencies`, not `devDependencies`, because Vercel installs with `npm ci --omit=dev` and then runs the build.
+- `npm install` with npm 11 on Windows has dropped rolldown's and lightningcss's optional platform packages from `package-lock.json`, which breaks `npm ci` elsewhere. After changing dependencies, check that `"node_modules/@rolldown/binding-linux-x64-gnu"` is still in the lockfile.
 
 ## Hosting
 

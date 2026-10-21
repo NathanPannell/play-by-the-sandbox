@@ -14,14 +14,19 @@ const files = (dir) =>
     .sort();
 
 describe('build', () => {
-  it('copies public/ to dist/ byte for byte', () => {
+  it('copies public/ to dist/ byte for byte and adds the hero bundle', () => {
     const out = join(mkdtempSync(join(tmpdir(), 'pbts-build-')), 'dist');
     try {
       build(out);
-      expect(files(out)).toEqual(files(publicDir));
+      expect(files(out)).toEqual([...files(publicDir), 'hero.js'].sort());
       for (const f of files(publicDir)) {
         expect(readFileSync(join(out, f)).equals(readFileSync(join(publicDir, f))), f).toBe(true);
       }
+      const hero = readFileSync(join(out, 'hero.js'), 'utf8');
+      // One self-contained, minified ES module: three.js is bundled, nothing is imported at runtime.
+      expect(hero).not.toMatch(/(^|[;}])\s*import[\s{*"'(]/);
+      expect(hero).toContain('heroScene');
+      expect(hero.length).toBeLessThan(800_000);
     } finally {
       rmSync(out, { recursive: true, force: true });
     }

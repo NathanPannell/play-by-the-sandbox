@@ -48,6 +48,8 @@ describe('local server', () => {
     ['/robots.txt', 'text/plain; charset=utf-8'],
     ['/sitemap.xml', 'application/xml'],
     ['/site.webmanifest', 'application/manifest+json'],
+    ['/hero.js', 'text/javascript; charset=utf-8'],
+    ['/hero-poster.jpg', 'image/jpeg'],
   ])('serves %s as %s', async (path, type) => {
     const res = await get(path);
     expect(res.status).toBe(200);
