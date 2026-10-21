@@ -28,6 +28,8 @@ test('the page loads with its title, share card and no errors', async ({ page })
       (r) => r.name.endsWith('/logo.svg') && r.responseEnd > 0,
     ),
   );
+  // Give the slide's onload redraw the same quiet half second networkidle used to.
+  await page.waitForTimeout(500);
   expect(errors).toEqual([]);
 });
 
