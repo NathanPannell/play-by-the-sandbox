@@ -13,7 +13,7 @@ test('the page loads with its title, share card and no errors', async ({ page })
   await expect(page.locator('h1')).toBeVisible();
   await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
     'content',
-    'https://www.playbythesandbox.ca/api/og?v=2',
+    'https://www.playbythesandbox.ca/api/og?v=3',
   );
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://playbythesandbox.ca/');
   // Wait for everything the page fetches: the load event, the web fonts, the
@@ -25,7 +25,7 @@ test('the page loads with its title, share card and no errors', async ({ page })
   await expect(page.locator('#heroScene')).toHaveClass(/ready/);
   await page.waitForFunction(() =>
     /** @type {PerformanceResourceTiming[]} */ (performance.getEntriesByType('resource')).some(
-      (r) => r.name.endsWith('/logo.svg') && r.responseEnd > 0,
+      (r) => r.name.endsWith('/wordmark.svg') && r.responseEnd > 0,
     ),
   );
   // Give the slide's onload redraw the same quiet half second networkidle used to.

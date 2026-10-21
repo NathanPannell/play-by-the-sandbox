@@ -1,29 +1,46 @@
-// How much scene a device gets. Phones get a smaller crowd, fewer particles and
-// 30 fps; everyone gets a device pixel ratio capped at 1.5.
+// How much scene a device gets. Phones get a smaller crowd, fewer particles,
+// 2x instead of 4x antialiasing and 30 fps; everyone gets a device pixel ratio
+// capped at 1.5. A software WebGL renderer (no usable GPU, e.g. SwiftShader or
+// llvmpipe) gets the phone-sized scene drawn at 0.6x resolution, without
+// antialiasing, at about 20 fps, because every pixel costs CPU there.
 
 export const MAX_DPR = 1.5;
+/** Resolution scale for software renderers. */
+export const SOFTWARE_SCALE = 0.6;
 
 /**
  * @typedef {{
  *   mobile: boolean,
+ *   lite: boolean,
  *   dpr: number,
  *   crowd: number,
  *   confetti: number,
  *   searchlights: number,
  *   frameSkip: number,
+ *   msaa: number,
  * }} Quality
  */
 
 /**
- * @param {{ width: number, devicePixelRatio: number, coarsePointer?: boolean }} env
+ * @param {{ width: number, devicePixelRatio: number, coarsePointer?: boolean, software?: boolean }} env
  * @returns {Quality}
  */
-export function pickQuality({ width, devicePixelRatio, coarsePointer = false }) {
+export function pickQuality({ width, devicePixelRatio, coarsePointer = false, software = false }) {
   const mobile = width < 760 || (coarsePointer && width < 1100);
   const dpr = Math.min(Math.max(devicePixelRatio || 1, 1), MAX_DPR);
+  const lite = { crowd: 100, confetti: 110, searchlights: 3 };
+  if (software) return { mobile, lite: true, ...lite, dpr: SOFTWARE_SCALE, frameSkip: 2, msaa: 0 };
   return mobile
-    ? { mobile, dpr, crowd: 90, confetti: 110, searchlights: 2, frameSkip: 1 }
-    : { mobile, dpr, crowd: 230, confetti: 320, searchlights: 4, frameSkip: 0 };
+    ? { mobile, lite: true, ...lite, dpr, frameSkip: 1, msaa: 2 }
+    : { mobile, lite: false, dpr, crowd: 260, confetti: 300, searchlights: 6, frameSkip: 0, msaa: 4 };
+}
+
+/**
+ * Whether a WebGL context is drawn by the CPU rather than a GPU.
+ * @param {string} renderer the unmasked renderer string
+ */
+export function isSoftwareRenderer(renderer) {
+  return /swiftshader|llvmpipe|softpipe|software|basic render driver/i.test(renderer);
 }
 
 /** A small deterministic PRNG (mulberry32), so every visitor sees the same scene. */

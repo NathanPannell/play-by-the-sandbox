@@ -1,9 +1,9 @@
-import { Color, DataTexture, InstancedMesh, Mesh, OneFactor, Texture, ZeroFactor } from 'three';
+import { Color, DataTexture, InstancedMesh, Mesh, OneFactor, Texture, Vector3, ZeroFactor } from 'three';
 import { describe, expect, it } from 'vitest';
-import { BOIL_FPS, createCrayonPass } from '../src/hero/crayon.js';
+import { BOIL_SPEED, WOBBLE_PX, createCrayonPass } from '../src/hero/crayon.js';
 import { bulbLayout } from '../src/hero/marquee.js';
-import { MAX_DPR, hash1, pickQuality, rng } from '../src/hero/quality.js';
-import { buildScene, glowMaterial } from '../src/hero/scene.js';
+import { MAX_DPR, SOFTWARE_SCALE, hash1, isSoftwareRenderer, pickQuality, rng } from '../src/hero/quality.js';
+import { EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
 const phone = pickQuality({ width: 390, devicePixelRatio: 3, coarsePointer: true });
@@ -53,6 +53,33 @@ describe('quality', () => {
     expect(phone.searchlights).toBeLessThan(desktop.searchlights);
     expect(phone.frameSkip).toBe(1);
     expect(desktop.frameSkip).toBe(0);
+    // Antialiasing, so thin things don't crawl as the camera turns.
+    expect(desktop.msaa).toBe(4);
+    expect(phone.msaa).toBe(2);
+  });
+
+  it('gives software WebGL a phone-sized scene at reduced resolution, without antialiasing', () => {
+    const cpu = pickQuality({ width: 1440, devicePixelRatio: 2, software: true });
+    expect(cpu.mobile).toBe(false);
+    expect(cpu.lite).toBe(true);
+    expect(cpu.dpr).toBe(SOFTWARE_SCALE);
+    expect(cpu.msaa).toBe(0);
+    expect(cpu.frameSkip).toBe(2);
+    expect(cpu.crowd).toBe(phone.crowd);
+    expect(desktop.lite).toBe(false);
+    expect(phone.lite).toBe(true);
+    for (const name of [
+      'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)',
+      'llvmpipe (LLVM 15.0.7, 256 bits)',
+      'ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0)',
+    ])
+      expect(isSoftwareRenderer(name), name).toBe(true);
+    for (const name of [
+      'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+      'Apple M2',
+      'Adreno (TM) 740',
+    ])
+      expect(isSoftwareRenderer(name), name).toBe(false);
   });
 
   it('treats touch tablets as mobile', () => {
@@ -126,14 +153,55 @@ describe('scene', () => {
       /** @type {number[]} */
       const xs = [];
       world.scene.children.forEach((c) => {
-        if (c.type === 'Group' && Math.abs(c.position.z - 18.6) < 0.01) xs.push(c.position.x);
+        if (c.type === 'Group' && Math.abs(c.position.z - 23) < 0.01) xs.push(c.position.x);
       });
       return xs;
     };
     expect(limoX(10)).toContain(0); // parked
     expect(limoX(2)[0]).toBeLessThan(-10); // arriving from the left
     expect(limoX(16)[0]).toBeGreaterThan(0); // driving off
-    expect(limoX(22)[0]).toBe(-80); // out of sight
+    expect(limoX(22)[0]).toBe(-120); // out of sight
+  });
+
+  it('stands the viewer on the carpet and turns a full circle, seamlessly, forever', () => {
+    const world = buildScene(desktop);
+    const { camera } = world;
+    /** @param {number} t */
+    const look = (t) => {
+      world.update(t);
+      return new Vector3(0, 0, -1).applyQuaternion(camera.quaternion).setY(0).normalize();
+    };
+    world.update(STILL_T);
+    expect(camera.position.distanceTo(EYE)).toBeLessThan(0.1);
+    // Facing the gallery (north) at the still moment.
+    expect(look(STILL_T).z).toBeLessThan(-0.99);
+    // Then east, south and west a quarter, a half and three quarters of a turn later.
+    expect(Math.abs(look(STILL_T + REVOLUTION / 4).x)).toBeGreaterThan(0.99);
+    expect(look(STILL_T + REVOLUTION / 2).z).toBeGreaterThan(0.99);
+    // Whole turns later the camera, bob and all, is exactly where it was: no seam.
+    world.update(STILL_T + 7);
+    const before = camera.quaternion.clone();
+    const height = camera.position.y;
+    world.update(STILL_T + 7 + REVOLUTION * 3);
+    expect(camera.quaternion.angleTo(before)).toBeLessThan(1e-6);
+    expect(camera.position.y).toBeCloseTo(height, 9);
+    // And it moves a little every frame, never a lot.
+    let worst = 0;
+    for (let t = 0; t < REVOLUTION; t += 1 / 30) {
+      world.update(t);
+      const q = camera.quaternion.clone();
+      world.update(t + 1 / 30);
+      worst = Math.max(worst, camera.quaternion.angleTo(q));
+    }
+    expect(worst).toBeLessThan(0.01);
+  });
+
+  it('can hold the camera still while the scene plays, for graphics QA', () => {
+    const world = buildScene(desktop);
+    world.update(5, 5);
+    const held = world.camera.quaternion.clone();
+    world.update(9, 5);
+    expect(world.camera.quaternion.angleTo(held)).toBeLessThan(1e-6);
   });
 
   it('pops camera flashes at phones', () => {
@@ -257,15 +325,18 @@ describe('crayon pass', () => {
     expect(pass.material.uniforms.uPx.value).toBe(1.5);
   });
 
-  it(`reseeds the strokes ${BOIL_FPS} times a second`, () => {
-    pass.setBoil(0);
-    const first = pass.material.uniforms.uBoil.value;
-    pass.setBoil(0.9 / BOIL_FPS);
-    expect(pass.material.uniforms.uBoil.value).toBe(first);
-    pass.setBoil(1.1 / BOIL_FPS);
-    expect(pass.material.uniforms.uBoil.value).toBe(first + 1);
-    pass.setBoil(10_000);
-    expect(pass.material.uniforms.uBoil.value).toBeLessThan(1000);
+  it('boils by drifting slowly, never by jumping', () => {
+    const boil = (/** @type {number} */ t) => {
+      pass.setBoil(t);
+      return pass.material.uniforms.uBoil.value;
+    };
+    // A frame apart, the drift moves a sliver of a noise cell.
+    for (const t of [0, 1.2, 37, 600]) expect(Math.abs(boil(t + 1 / 60) - boil(t))).toBeLessThan(0.01);
+    expect(boil(2) - boil(1)).toBeCloseTo(BOIL_SPEED, 6);
+    // Wrapped to stay precise, once every few hours.
+    expect(boil(4096 / BOIL_SPEED + 1)).toBeLessThan(1);
+    expect(pass.material.uniforms.uWobble.value).toBe(WOBBLE_PX);
+    expect(WOBBLE_PX).toBeLessThanOrEqual(2.5);
   });
 
   it('cleans up', () => {

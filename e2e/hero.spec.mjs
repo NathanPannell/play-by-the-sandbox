@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { measure } from '../tools/flicker.mjs';
 
 /** @param {import('@playwright/test').Page} page */
 const frames = (page) =>
@@ -128,6 +129,48 @@ test('without WebGL the crayon poster stands in for the scene', async ({ page })
     .toBeGreaterThan(300);
   await expect(page.locator('.hero-card h1')).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test('graphics QA: holding the camera still, the crayon scene does not flicker', async ({ page }) => {
+  // The scene plays (crowd, flashes, marquee, confetti, the crayon boil) while
+  // the camera stays put, so any frame-to-frame popping is flicker, not motion.
+  // tools/flicker.mjs measures the same thing across a whole revolution.
+  test.setTimeout(90_000);
+  await page.goto('/?hero-debug');
+  await expect(page.locator('#heroScene')).toHaveClass(/ready/);
+  await page.evaluate(() => document.fonts.ready);
+  for (const start of [11.2, 30]) {
+    const times = Array.from({ length: 8 }, (_, i) => start + i / 30);
+    const { flicker, pops } = await measure(page, times, true);
+    expect(Math.max(...flicker), `flicker from t=${start}`).toBeLessThan(3);
+    expect(Math.max(...pops), `popping pixels from t=${start}`).toBeLessThan(2.5);
+  }
+});
+
+test('the camera turns all the way round, from the middle of the event', async ({ page }) => {
+  await page.goto('/?hero-debug');
+  await expect(page.locator('#heroScene')).toHaveClass(/ready/);
+  // Four quarter turns apart, four different views; a full turn later, the first again.
+  const views = await page.evaluate(() => {
+    const hero = /** @type {any} */ (window).__hero;
+    const scratch = document.createElement('canvas');
+    const ctx = /** @type {CanvasRenderingContext2D} */ (scratch.getContext('2d', { willReadFrequently: true }));
+    /** @param {number} t */
+    const grab = (t) => {
+      // The scene is held at one moment; only the camera moves.
+      const gl = hero.draw(11.2, t);
+      scratch.width = 64;
+      scratch.height = 36;
+      ctx.drawImage(gl, 0, 0, 64, 36);
+      return Array.from(ctx.getImageData(0, 0, 64, 36).data);
+    };
+    return [0, 1, 2, 3, 4].map((q) => grab(11.2 + q * 18.75));
+  });
+  /** @param {number[]} a @param {number[]} b */
+  const diff = (a, b) => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0) / a.length;
+  for (let q = 1; q < 4; q++) expect(diff(views[0], views[q]), `quarter turn ${q}`).toBeGreaterThan(20);
+  // A full turn later it is the same view (only the gentle bob differs).
+  expect(diff(views[0], views[4])).toBeLessThan(3);
 });
 
 test.describe('at 375px wide', () => {
