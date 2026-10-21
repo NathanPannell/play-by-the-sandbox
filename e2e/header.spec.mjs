@@ -3,46 +3,36 @@ import { expect, test } from '@playwright/test';
 /** Where the shared wobble filter's noise has drifted to. @param {import('@playwright/test').Page} page */
 const drift = (page) => page.locator('#wmDrift').evaluate((el) => `${el.getAttribute('dx')},${el.getAttribute('dy')}`);
 
-test('the crayon wordmark is the logo in the header, the hero title and the footer', async ({ page }) => {
+test('the crayon wordmark is the title inlay and the footer logo', async ({ page }) => {
   await page.goto('/');
-  const home = page.locator('header.nav a.brand');
-  await expect(home).toHaveAttribute('href', '#top');
-  await expect(home).toHaveAccessibleName('Play by the Sandbox home');
-  const header = home.locator('svg.wordmark');
-  await expect(header).toBeVisible();
-  await expect(header).toHaveAttribute('role', 'img');
-  await expect(header).toHaveAttribute('aria-label', 'Sandbox');
-  // s, a, n, d, b, o and the two strokes of the x.
-  await expect(header.locator('.wm-s')).toHaveCount(8);
-  // The old fish icon and text wordmark are gone.
-  await expect(home.locator('svg')).toHaveCount(1);
-  await expect(home).not.toContainText('sandbox');
-
   // The hero title reads "Play by the Sandbox" to search and screen readers.
-  const title = page.locator('.hero-card h1');
+  const title = page.locator('.hud-title h1');
   await expect(title.locator('svg.wordmark')).toBeVisible();
   await expect(title).toHaveText(/Play by the\s*Sandbox/);
+  await expect(title.locator('svg.wordmark .wm-s')).toHaveCount(8);
 
   const footer = page.locator('footer svg.wordmark');
+  await expect(footer).toHaveAttribute('role', 'img');
   await expect(footer).toHaveAttribute('aria-label', 'Sandbox');
   await expect(page.locator('footer')).not.toContainText('dragon');
 
-  // Three wordmarks, one shared filter.
-  await expect(page.locator('svg.wordmark')).toHaveCount(3);
+  // Two wordmarks, one shared filter, and no old header bar.
+  await expect(page.locator('svg.wordmark')).toHaveCount(2);
   await expect(page.locator('[id="wmWobble"]')).toHaveCount(1);
+  await expect(page.locator('header.nav')).toHaveCount(0);
 });
 
 test('the wordmarks draw themselves in, then wiggle and boil smoothly', async ({ page }) => {
   await page.goto('/');
   const names = await page
-    .locator('header .wm-s')
+    .locator('.hud-title .wm-s')
     .first()
     .evaluate((el) => el.getAnimations().map((a) => /** @type {CSSAnimation} */ (a).animationName));
   expect(names).toEqual(['sbDraw']);
   await expect
     .poll(() =>
       page
-        .locator('.hero-card .wm-s')
+        .locator('.hud-title .wm-s')
         .last()
         .evaluate((el) => getComputedStyle(el).strokeDashoffset),
     )
@@ -50,11 +40,11 @@ test('the wordmarks draw themselves in, then wiggle and boil smoothly', async ({
   // The outline boils by drifting the noise, and the letters wiggle.
   const first = await drift(page);
   await expect.poll(() => drift(page), { timeout: 5000 }).not.toBe(first);
-  await expect(page.locator('header .wm-s').first()).toHaveAttribute('transform', /translate\(0 -?[\d.]+\) rotate/);
+  await expect(page.locator('.hud-title .wm-s').first()).toHaveAttribute('transform', /translate\(0 -?[\d.]+\) rotate/);
 
   // Smoothly: a quarter second apart, no letter has moved more than a pixel or two.
   const centres = () =>
-    page.locator('header .wm-s').evaluateAll((els) =>
+    page.locator('.hud-title .wm-s').evaluateAll((els) =>
       els.map((el) => {
         const r = el.getBoundingClientRect();
         return [r.x + r.width / 2, r.y + r.height / 2];
@@ -95,15 +85,15 @@ test('the wordmarks hold still, fully drawn, for reduced motion', async ({ page 
   const before = await drift(page);
   await page.waitForTimeout(600);
   expect(await drift(page)).toBe(before);
-  await expect(page.locator('header .wm-s').first()).not.toHaveAttribute('transform', /./);
+  await expect(page.locator('.hud-title .wm-s').first()).not.toHaveAttribute('transform', /./);
 });
 
 test.describe('at 375px wide', () => {
   test.use({ viewport: { width: 375, height: 740 } });
 
-  test('the wordmark fits the header', async ({ page }) => {
+  test('the title inlay fits, with no overflow', async ({ page }) => {
     await page.goto('/');
-    const box = await page.locator('header svg.wordmark').boundingBox();
+    const box = await page.locator('.hud-title').boundingBox();
     expect(box).not.toBeNull();
     const { x, width } = /** @type {{ x: number, width: number }} */ (box);
     expect(x).toBeGreaterThanOrEqual(0);

@@ -6,6 +6,7 @@
 // running, paused, static or fallback.
 import {
   CanvasTexture,
+  DataTexture,
   DepthTexture,
   LinearFilter,
   SRGBColorSpace,
@@ -15,7 +16,7 @@ import {
 } from 'three';
 import { createCrayonPass } from './crayon.js';
 import { BLUE, INK, PAPER, RED, YELLOW } from './palette.js';
-import { isSoftwareRenderer, pickQuality } from './quality.js';
+import { adaptScale, isSoftwareRenderer, pickQuality } from './quality.js';
 import { STILL_T, buildScene } from './scene.js';
 
 /** Where the running animation starts: a few seconds before the view turns to face the gallery. */
@@ -38,13 +39,19 @@ function start(root) {
     return setState('fallback');
   }
 
+  const params = new URLSearchParams(window.location.search);
+  const qa = params.has('hero-debug');
+  // QA only: ?hero-debug&hero-tier=full|lite|software forces a quality tier.
+  const tier = qa ? params.get('hero-tier') : null;
   const gl = renderer.getContext();
   const info = gl.getExtension('WEBGL_debug_renderer_info');
   const quality = pickQuality({
-    width: window.innerWidth,
+    width: tier === 'full' ? 1440 : tier === 'lite' ? 390 : window.innerWidth,
     devicePixelRatio: window.devicePixelRatio,
-    coarsePointer: window.matchMedia('(pointer: coarse)').matches,
-    software: isSoftwareRenderer(String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))),
+    coarsePointer: tier === 'full' ? false : window.matchMedia('(pointer: coarse)').matches,
+    software: tier
+      ? tier === 'software'
+      : isSoftwareRenderer(String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))),
   });
   const canvas = renderer.domElement;
   canvas.className = 'hero-canvas';
@@ -64,6 +71,15 @@ function start(root) {
   let frames = 0;
   let lost = false;
   let debug = false;
+  // The visitor's own choice from the pause/play control (WCAG 2.2.2).
+  /** @type {'pause' | 'play' | null} */
+  let choice = null;
+  // Adaptive quality: the render scale, and frame timing for the current window.
+  let scale = 1;
+  let calm = 0;
+  let windowStart = 0;
+  let windowFrames = 0;
+  let lastDrawn = 0;
 
   const ads = adTexture(() => {
     // Redraw a held frame with the slides; the first paint happens during setup, before the scene exists.
@@ -84,6 +100,7 @@ function start(root) {
     depth: /** @type {DepthTexture} */ (target.depthTexture),
     near: world.camera.near,
     far: world.camera.far,
+    lite: quality.lite,
   });
 
   /** @param {number} t @param {number} [cameraT] */
@@ -96,19 +113,56 @@ function start(root) {
     renderer.render(crayon.scene, crayon.camera);
     canvas.dataset.frames = String(++frames);
     root.classList.add('ready');
+    placeCallout();
   }
 
+  // A speech bubble riding on the marquee, hidden when the sign is out of view.
+  const callout = document.getElementById('heroCallout');
+  const anchor = world.anchors.marquee.clone();
+  let calloutAt = '';
+  let calloutWidth = 0;
+  function placeCallout() {
+    if (!callout) return;
+    anchor.copy(world.anchors.marquee).project(world.camera);
+    const visible = anchor.z < 1 && anchor.x > -0.85 && anchor.x < 0.8 && anchor.y < 0.75 && anchor.y > -0.55;
+    if (!visible) {
+      if (!callout.hidden) callout.hidden = true;
+      calloutAt = '';
+      return;
+    }
+    if (callout.hidden) callout.hidden = false;
+    // Measured once: reading layout every frame after moving it would force a reflow each time.
+    if (!calloutWidth) calloutWidth = callout.offsetWidth;
+    const w = sizes.w;
+    // Hang below and to the right of the corner, the tail pointing back up at it.
+    const x = Math.min(((anchor.x + 1) / 2) * w - 26, w - calloutWidth - 10);
+    const y = ((1 - anchor.y) / 2) * sizes.h + 16;
+    const at = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    if (at !== calloutAt) callout.style.transform = calloutAt = at;
+  }
+
+  let sized = '';
+  /** The scene's size in CSS pixels, read on resize rather than every frame. */
+  const sizes = { w: 1, h: 1 };
   function resize() {
     const w = Math.max(1, root.clientWidth);
     const h = Math.max(1, root.clientHeight);
+    sizes.w = w;
+    sizes.h = h;
+    calloutWidth = 0;
+    // The scene is sized to the large viewport, so a phone's address bar
+    // doesn't resize it; and nothing is re-allocated unless something changed.
+    const key = `${w}x${h}@${renderer.getPixelRatio()}`;
+    if (key === sized) return;
+    sized = key;
     renderer.setSize(w, h, false);
     const px = renderer.getPixelRatio();
     target.setSize(Math.round(w * px), Math.round(h * px));
     crayon.setSize(Math.round(w * px), Math.round(h * px), px);
     world.setAspect(w / h);
     const aspect = w / h;
-    // On phones the card covers the bottom of the hero, so tilt the view up over it.
-    world.setShift(0, aspect < 0.8 ? 0.08 : 0);
+    // Portrait: lift the view a touch over the call to action at the bottom.
+    world.setShift(0, aspect < 0.8 ? 0.04 : 0);
     if (mode === 'static' || mode === 'paused') draw(mode === 'static' ? STILL_T : t);
   }
 
@@ -121,23 +175,79 @@ function start(root) {
     // Phones draw every other frame (about 30 fps), software renderers every third.
     if (quality.frameSkip && tick++ % (quality.frameSkip + 1)) return;
     draw(t);
+    adapt(now);
+  }
+
+  /** @param {number} now */
+  function adapt(now) {
+    if (!lastDrawn) {
+      lastDrawn = windowStart = now;
+      windowFrames = 0;
+      return;
+    }
+    lastDrawn = now;
+    windowFrames++;
+    if (now - windowStart < 2000) return;
+    const interval = (now - windowStart) / windowFrames;
+    windowStart = now;
+    windowFrames = 0;
+    const next = adaptScale({
+      scale,
+      interval,
+      budget: (1000 / 60) * (quality.frameSkip + 1),
+      calm,
+      min: Math.max(0.55, 0.5 / quality.dpr),
+    });
+    calm = next.calm;
+    if (next.scale !== scale) {
+      scale = next.scale;
+      root.dataset.scale = String(scale);
+      renderer.setPixelRatio(quality.dpr * scale);
+      resize();
+    }
   }
 
   function schedule() {
     if (lost || debug) return;
-    const want = reduced.matches ? 'static' : !document.hidden && onScreen ? 'running' : 'paused';
+    const still = choice === 'pause' || (reduced.matches && choice !== 'play');
+    const want = still
+      ? choice === 'pause'
+        ? 'paused'
+        : 'static'
+      : !document.hidden && onScreen
+        ? 'running'
+        : 'paused';
+    showChoice(still);
     if (want === mode && (want !== 'running' || raf)) return setState(mode);
     cancelAnimationFrame(raf);
     raf = 0;
     mode = want;
     if (mode === 'running') {
       last = 0;
+      lastDrawn = 0;
       raf = requestAnimationFrame(loop);
     } else if (mode === 'static') {
       draw(STILL_T);
     }
     setState(mode);
   }
+
+  // The pause/play control: the motion runs forever, so visitors can stop it.
+  const toggle = document.getElementById('heroPause');
+  /** @param {boolean} still */
+  function showChoice(still) {
+    if (!toggle) return;
+    toggle.setAttribute('aria-pressed', String(still));
+    toggle.setAttribute('aria-label', still ? 'Play the scene' : 'Pause the scene');
+    const label = toggle.querySelector('.hud-pause-label');
+    if (label) label.textContent = still ? 'Play' : 'Pause';
+    root.dataset.choice = choice ?? '';
+  }
+  toggle?.addEventListener('click', () => {
+    const still = choice === 'pause' || (reduced.matches && choice !== 'play');
+    choice = still ? 'play' : 'pause';
+    schedule();
+  });
 
   new ResizeObserver(resize).observe(root);
   new IntersectionObserver((entries) => {
@@ -157,6 +267,7 @@ function start(root) {
   });
   canvas.addEventListener('webglcontextrestored', () => {
     lost = false;
+    sized = '';
     resize();
     schedule();
   });
@@ -166,7 +277,7 @@ function start(root) {
 
   // Graphics QA (tools/flicker.mjs, e2e/hero.spec.mjs): with ?hero-debug the
   // page exposes a way to stop the loop and draw any moment exactly.
-  if (new URLSearchParams(window.location.search).has('hero-debug')) {
+  if (qa) {
     /** @type {any} */ (window).__hero = {
       /** @param {number} at seconds @param {number} [cameraAt] hold the camera at this time instead */
       draw(at, cameraAt = at) {
@@ -177,6 +288,31 @@ function start(root) {
         mode = 'paused';
         t = at;
         draw(at, cameraAt);
+        return canvas;
+      },
+      world,
+      /**
+       * Runs the crayon pass alone over a flat colour (flat depth, no glow),
+       * so the paper, grain and strokes can be checked for seams without any
+       * scene in the way.
+       * @param {number[]} rgb 0-255, sRGB
+       */
+      paper(rgb) {
+        this.draw(t);
+        const [r, g, b] = rgb.map((c) => Math.round(255 * (c / 255) ** 2.2));
+        const flat = new DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
+        const far = new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+        flat.needsUpdate = far.needsUpdate = true;
+        const uniforms = crayon.material.uniforms;
+        const [color, depth] = [uniforms.tColor.value, uniforms.tDepth.value];
+        uniforms.tColor.value = flat;
+        uniforms.tDepth.value = far;
+        renderer.setRenderTarget(null);
+        renderer.render(crayon.scene, crayon.camera);
+        uniforms.tColor.value = color;
+        uniforms.tDepth.value = depth;
+        flat.dispose();
+        far.dispose();
         return canvas;
       },
     };

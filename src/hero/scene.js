@@ -218,7 +218,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
   scene.add(robsonSquare(random));
   scene.add(eastSide());
   scene.add(acrossTheStreet(random));
-  scene.add(skyline(random, quality.lite ? 26 : 44));
+  scene.add(skyline(random, quality.lite ? 26 : 44, !quality.lite));
 
   const marquee = marqueeSign();
   scene.add(marquee.group);
@@ -232,7 +232,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
   const people = crowd(quality.crowd, quality.lite ? 6 : 12, random);
   scene.add(people.group);
 
-  const stars = influencers(random);
+  const stars = influencers(random, quality.lite);
   scene.add(stars.group);
 
   const limos = [limo(PINK), limo('#FFFFFF')];
@@ -251,9 +251,11 @@ export function buildScene(quality, { adTexture = null } = {}) {
    */
   function setAspect(aspect) {
     camera.aspect = aspect;
-    const minHalfWidth = Math.tan((25 * Math.PI) / 180);
+    // Portrait phones get a taller lens (up to 96 degrees) so the marquee and
+    // the crowd still fit across about 52 degrees.
+    const minHalfWidth = Math.tan((26 * Math.PI) / 180);
     const fitWidth = Math.atan(minHalfWidth / aspect);
-    camera.fov = Math.min(80, Math.max(56, (fitWidth * 360) / Math.PI));
+    camera.fov = Math.min(96, Math.max(56, (fitWidth * 360) / Math.PI));
     camera.updateProjectionMatrix();
   }
 
@@ -302,7 +304,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
   setAspect(16 / 9);
   update(0);
 
-  return { scene, camera, update, setAspect, setShift };
+  return { scene, camera, update, setAspect, setShift, anchors: { marquee: marquee.anchor } };
 }
 
 function sky() {
@@ -690,11 +692,13 @@ function acrossTheStreet(random) {
 }
 
 /**
- * City towers in a ring all round, with lit windows facing the viewer.
+ * City towers in a ring all round, with lit windows facing the viewer (left
+ * off on lighter devices: they are most of the triangles and far away).
  * @param {() => number} random
  * @param {number} count
+ * @param {boolean} windows
  */
-function skyline(random, count) {
+function skyline(random, count, windows) {
   const b = new Batch();
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + random() * 0.08;
@@ -714,7 +718,7 @@ function skyline(random, count) {
     const sideZ = Math.sin(a);
     for (let y = 3; y < h - 2; y += 3.4) {
       for (let k = -1; k <= 1; k++) {
-        if (random() > 0.45) {
+        if (random() > 0.45 && windows) {
           b.box(
             1.1,
             1.4,
@@ -829,8 +833,14 @@ function marqueeSign() {
   const warm = new Color('#FFE38A');
   const amber = new Color('#E39A2A');
   const c = new Color();
-  /** @param {number} t */
-  function update(t) {
+  let shown = NaN;
+  /** @param {number} time */
+  function update(time) {
+    // The lights move in smooth waves, so 20 updates a second is plenty, and
+    // it saves re-uploading every bulb's colour on every frame.
+    const t = Math.floor(time * 20) / 20;
+    if (t === shown) return;
+    shown = t;
     // Smooth waves, not steps: a sparkle sweeping across the letters, and a
     // chase running round the border.
     pixels.forEach((p, i) => {
@@ -845,7 +855,9 @@ function marqueeSign() {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     });
   }
-  return { group, update };
+  /** The sign's lower right corner, where a speech bubble can point up at it. */
+  const anchor = new Vector3(W / 2 - 1.2, y - H / 2 - 0.2, z + 0.4);
+  return { group, update, anchor };
 }
 
 /**
@@ -1130,10 +1142,13 @@ function crowd(count, paparazzi, random) {
 }
 
 /**
- * Influencers posing all round the viewer with selfie sticks and phones.
+ * Influencers posing all round the viewer with selfie sticks and phones. On
+ * lighter devices they stand still, merged into one mesh: one draw call
+ * instead of nine.
  * @param {() => number} random
+ * @param {boolean} still
  */
-function influencers(random) {
+function influencers(random, still) {
   const group = new Group();
   const looks = [
     { x: -0.7, z: 6.5, outfit: YELLOW, hair: INK, stick: true },
@@ -1177,6 +1192,21 @@ function influencers(random) {
     figures.push({ group: g, phase: random() * 6, base, ry });
     emitters.push(worldPoint(g, tip, 3));
   });
+  if (still) {
+    group.updateMatrixWorld(true);
+    const merged = figures.map((f) => {
+      const mesh = /** @type {Mesh} */ (f.group.children[0]);
+      return mesh.geometry.clone().applyMatrix4(f.group.matrixWorld);
+    });
+    const first = /** @type {Mesh} */ (figures[0].group.children[0]);
+    const one = new Mesh(mergeGeometries(merged), first.material);
+    figures.forEach((f) => /** @type {Mesh} */ (f.group.children[0]).geometry.dispose());
+    merged.forEach((g) => g.dispose());
+    const frozen = new Group();
+    frozen.add(one);
+    // The flash emitters stay where they were, fixed to the (now static) poses.
+    return { group: frozen, update: () => {}, emitters };
+  }
   /** @param {number} t */
   function update(t) {
     figures.forEach((f) => {

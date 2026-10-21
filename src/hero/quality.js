@@ -1,10 +1,11 @@
 // How much scene a device gets. Phones get a smaller crowd, fewer particles,
-// 2x instead of 4x antialiasing and 30 fps; everyone gets a device pixel ratio
-// capped at 1.5. A software WebGL renderer (no usable GPU, e.g. SwiftShader or
+// 2x instead of 4x antialiasing, 30 fps and a device pixel ratio capped at
+// 1.25 (1.5 elsewhere). A software WebGL renderer (no usable GPU, e.g. SwiftShader or
 // llvmpipe) gets the phone-sized scene drawn at 0.6x resolution, without
 // antialiasing, at about 20 fps, because every pixel costs CPU there.
 
 export const MAX_DPR = 1.5;
+export const MOBILE_DPR = 1.25;
 /** Resolution scale for software renderers. */
 export const SOFTWARE_SCALE = 0.6;
 
@@ -27,12 +28,29 @@ export const SOFTWARE_SCALE = 0.6;
  */
 export function pickQuality({ width, devicePixelRatio, coarsePointer = false, software = false }) {
   const mobile = width < 760 || (coarsePointer && width < 1100);
-  const dpr = Math.min(Math.max(devicePixelRatio || 1, 1), MAX_DPR);
+  const dpr = Math.min(Math.max(devicePixelRatio || 1, 1), mobile ? MOBILE_DPR : MAX_DPR);
   const lite = { crowd: 100, confetti: 110, searchlights: 3 };
   if (software) return { mobile, lite: true, ...lite, dpr: SOFTWARE_SCALE, frameSkip: 2, msaa: 0 };
   return mobile
     ? { mobile, lite: true, ...lite, dpr, frameSkip: 1, msaa: 2 }
     : { mobile, lite: false, dpr, crowd: 260, confetti: 300, searchlights: 6, frameSkip: 0, msaa: 4 };
+}
+
+/**
+ * Adaptive quality: one step of the render scale, from the mean interval
+ * between drawn frames over the last window. Slow frames step the scale down
+ * by 15% at once; it only steps back up after three calm windows in a row, so
+ * it doesn't hunt. Changing the scale re-allocates the render target, so this
+ * runs every couple of seconds, not every frame.
+ * @param {{ scale: number, interval: number, budget: number, calm: number, min: number }} state
+ *   budget: the interval the device should manage (ms); min: the lowest scale allowed
+ * @returns {{ scale: number, calm: number }}
+ */
+export function adaptScale({ scale, interval, budget, calm, min }) {
+  if (interval > budget * 1.3) return { scale: Math.max(min, Math.round(scale * 0.85 * 100) / 100), calm: 0 };
+  if (interval > budget * 1.08) return { scale, calm: 0 };
+  if (calm + 1 >= 3 && scale < 1) return { scale: Math.min(1, Math.round((scale / 0.85) * 100) / 100), calm: 0 };
+  return { scale, calm: calm + 1 };
 }
 
 /**
