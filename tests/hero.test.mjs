@@ -1,18 +1,24 @@
-import { DataTexture, InstancedMesh, Mesh, Texture } from 'three';
+import { Color, DataTexture, InstancedMesh, Mesh, Texture } from 'three';
 import { describe, expect, it } from 'vitest';
 import { BOIL_FPS, createCrayonPass } from '../src/hero/crayon.js';
 import { bulbLayout } from '../src/hero/marquee.js';
 import { MAX_DPR, hash1, pickQuality, rng } from '../src/hero/quality.js';
-import { buildScene } from '../src/hero/scene.js';
+import { buildScene, glowMaterial } from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
 const phone = pickQuality({ width: 390, devicePixelRatio: 3, coarsePointer: true });
 
-/** @param {import('three').Object3D} root */
-function census(root) {
+/**
+ * Counts meshes and instances. `scalable` leaves out the marquee, which is the
+ * same size on every device.
+ * @param {import('three').Object3D} root
+ * @param {{ scalable?: boolean }} [options]
+ */
+function census(root, { scalable = false } = {}) {
   let meshes = 0;
   let instances = 0;
   root.traverse((o) => {
+    if (scalable && o.name.startsWith('marquee-')) return;
     if (o instanceof InstancedMesh) instances += o.count;
     else if (o instanceof Mesh) meshes++;
   });
@@ -95,8 +101,8 @@ describe('scene', () => {
   });
 
   it('is lighter on phones', () => {
-    const big = census(buildScene(desktop).scene);
-    const small = census(buildScene(phone).scene);
+    const big = census(buildScene(desktop).scene, { scalable: true });
+    const small = census(buildScene(phone).scene, { scalable: true });
     expect(small.instances).toBeLessThan(big.instances / 2);
     expect(small.meshes).toBeLessThan(big.meshes);
   });
@@ -161,6 +167,37 @@ describe('scene', () => {
     expect(world.camera.quaternion.angleTo(centred)).toBeGreaterThan(0.05);
   });
 
+  it('lights SANDBOX as a glowing sign whose letters never dim', () => {
+    const world = buildScene(desktop);
+    const letters = /** @type {InstancedMesh} */ (world.scene.getObjectByName('marquee-letters'));
+    const bulbs = /** @type {InstancedMesh} */ (world.scene.getObjectByName('marquee-bulbs'));
+    const chasers = /** @type {InstancedMesh} */ (world.scene.getObjectByName('marquee-chasers'));
+    expect(letters.count).toBe(bulbLayout('SANDBOX').length);
+    for (const mesh of [letters, bulbs, chasers]) {
+      expect(/** @type {import('three').ShaderMaterial} */ (mesh.material).fragmentShader).toContain(
+        'vec4(vColor, 0.0)',
+      );
+    }
+    const colours = (/** @type {InstancedMesh} */ mesh) => Array.from(mesh.instanceColor?.array ?? []);
+    world.update(1);
+    const lettersAt1 = colours(letters);
+    const bulbsAt1 = colours(bulbs);
+    const chasersAt1 = colours(chasers);
+    world.update(1.25);
+    expect(colours(letters)).toEqual(lettersAt1);
+    expect(colours(bulbs)).not.toEqual(bulbsAt1);
+    expect(colours(chasers)).not.toEqual(chasersAt1);
+    // Bright: every letter pixel is the same warm marquee yellow.
+    const yellow = new Color();
+    for (let i = 0; i < letters.count; i++) expect(letters.getColorAt(i, yellow).getHexString()).toBe('ffc93a');
+  });
+
+  it('marks glowing pixels with zero alpha for the crayon pass', () => {
+    const material = glowMaterial();
+    expect(material.fragmentShader).toContain('gl_FragColor = vec4(vColor, 0.0)');
+    expect(material.vertexShader).toContain('instanceMatrix');
+  });
+
   it('shows the site ads on the projector wall when given them', () => {
     const ads = new Texture();
     const world = buildScene(desktop, { adTexture: ads });
@@ -186,6 +223,9 @@ describe('crayon pass', () => {
     const uniforms = pass.material.uniforms;
     expect(pass.scene.children).toHaveLength(1);
     expect(pass.material.fragmentShader).toContain('tDepth');
+    // Light sources keep their colour and get a halo instead of ink.
+    expect(pass.material.fragmentShader).toContain('glowAt');
+    expect(uniforms.uHalo.value.getHexString('srgb-linear')).toBe('ffb02e');
     expect(pass.material.depthTest).toBe(false);
     expect(uniforms.uNear.value).toBe(0.5);
     expect(uniforms.uFar.value).toBe(260);

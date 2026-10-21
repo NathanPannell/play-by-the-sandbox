@@ -29,6 +29,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
+  NoBlending,
   Object3D,
   PerspectiveCamera,
   PlaneGeometry,
@@ -492,71 +493,104 @@ function plaza(random) {
   return b.mesh();
 }
 
+/**
+ * An unlit material that marks its pixels as glowing: it writes alpha 0 into
+ * the render target, which the crayon pass reads as "light source" (full
+ * colour, no ink, a hatched halo around it). Works on instanced meshes.
+ */
+export function glowMaterial() {
+  return new ShaderMaterial({
+    blending: NoBlending,
+    vertexShader: /* glsl */ `
+      varying vec3 vColor;
+      void main() {
+        vColor = vec3(1.0);
+        #ifdef USE_INSTANCING_COLOR
+          vColor = instanceColor;
+        #endif
+        gl_Position = projectionMatrix * modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      varying vec3 vColor;
+      void main() { gl_FragColor = vec4(vColor, 0.0); }`,
+  });
+}
+
+/**
+ * SANDBOX in marquee lights on an ink-black board: solid, touching letter
+ * pixels that glow warm yellow, with bulbs on top that twinkle, and a chaser
+ * border. The letters themselves never dim, so the word always reads.
+ */
 function marqueeSign() {
   const group = new Group();
   const b = new Batch();
-  const W = 17.6;
-  const H = 4.4;
+  const W = 18.4;
+  const H = 4.6;
   const y = 16.2;
   const z = -7.2;
-  b.box(W, H, 0.5, '#3B1E6E', 0, y, z);
-  b.box(W + 0.6, 0.35, 0.7, GOLD, 0, y + H / 2, z);
-  b.box(W + 0.6, 0.35, 0.7, GOLD, 0, y - H / 2, z);
+  b.box(W, H, 0.5, INK, 0, y, z);
+  b.box(W + 0.7, 0.4, 0.7, GOLD, 0, y + H / 2, z);
+  b.box(W + 0.7, 0.4, 0.7, GOLD, 0, y - H / 2, z);
   for (const sx of [-1, 1]) {
-    b.box(0.35, H + 0.35, 0.7, GOLD, (sx * (W + 0.25)) / 2, y, z);
+    b.box(0.4, H + 0.4, 0.7, GOLD, (sx * (W + 0.3)) / 2, y, z);
     b.box(0.35, 4, 0.35, INK, sx * (W / 2 - 1.5), y - H / 2 - 2, z - 0.2);
   }
   group.add(b.mesh());
 
-  const spacing = 0.4;
-  const letters = bulbLayout('SANDBOX').map((p) => ({
+  const spacing = 0.42;
+  const pixels = bulbLayout('SANDBOX').map((p) => ({
     x: p.x * spacing,
     y: y + p.y * spacing,
-    phase: p.letter,
-    edge: false,
+    column: Math.round(p.x),
   }));
+  const letters = new InstancedMesh(new BoxGeometry(spacing, spacing, 0.12), glowMaterial(), pixels.length);
+  const bulbs = new InstancedMesh(new IcosahedronGeometry(0.12, 0), glowMaterial(), pixels.length);
+  const m = new Matrix4();
+  const letterColor = new Color('#FFC93A');
+  pixels.forEach((p, i) => {
+    letters.setMatrixAt(i, m.makeTranslation(p.x, p.y, z + 0.3));
+    letters.setColorAt(i, letterColor);
+    bulbs.setMatrixAt(i, m.makeTranslation(p.x, p.y, z + 0.42));
+  });
+
   // Chaser bulbs around the border.
-  /** @type {{ x: number, y: number, phase: number, edge: boolean }[]} */
+  /** @type {{ x: number, y: number, phase: number }[]} */
   const border = [];
-  const nx = 30;
+  const nx = 32;
   const ny = 7;
   for (let i = 0; i < nx; i++) {
-    const x = -W / 2 + 0.35 + (i / (nx - 1)) * (W - 0.7);
-    border.push(
-      { x, y: y + H / 2 - 0.42, phase: i, edge: true },
-      { x, y: y - H / 2 + 0.42, phase: nx - i, edge: true },
-    );
+    const x = -W / 2 + 0.4 + (i / (nx - 1)) * (W - 0.8);
+    border.push({ x, y: y + H / 2 - 0.45, phase: i }, { x, y: y - H / 2 + 0.45, phase: nx - i });
   }
   for (let i = 1; i < ny - 1; i++) {
-    const yy = y - H / 2 + 0.42 + (i / (ny - 1)) * (H - 0.84);
-    border.push(
-      { x: -W / 2 + 0.35, y: yy, phase: i, edge: true },
-      { x: W / 2 - 0.35, y: yy, phase: i + 3, edge: true },
-    );
+    const yy = y - H / 2 + 0.45 + (i / (ny - 1)) * (H - 0.9);
+    border.push({ x: -W / 2 + 0.4, y: yy, phase: i }, { x: W / 2 - 0.4, y: yy, phase: i + 3 });
   }
-  const all = [...letters, ...border];
-  const bulbs = new InstancedMesh(new IcosahedronGeometry(0.15, 0), new MeshBasicMaterial({ fog: false }), all.length);
-  const m = new Matrix4();
-  all.forEach((p, i) => {
-    m.makeTranslation(p.x, p.y, z + 0.3);
-    bulbs.setMatrixAt(i, m);
+  const chasers = new InstancedMesh(new IcosahedronGeometry(0.17, 0), glowMaterial(), border.length);
+  border.forEach((p, i) => chasers.setMatrixAt(i, m.makeTranslation(p.x, p.y, z + 0.3)));
+  [bulbs, chasers].forEach((mesh) => {
+    mesh.setColorAt(0, letterColor);
+    mesh.instanceColor?.setUsage(DynamicDrawUsage);
   });
-  bulbs.instanceColor?.setUsage(DynamicDrawUsage);
-  group.add(bulbs);
+  letters.name = 'marquee-letters';
+  bulbs.name = 'marquee-bulbs';
+  chasers.name = 'marquee-chasers';
+  group.add(letters, bulbs, chasers);
 
-  const on = new Color('#FFF6C8');
-  const warm = new Color(YELLOW);
-  const off = new Color('#8A6A2A');
+  const white = new Color('#FFFDF0');
+  const warm = new Color('#FFE38A');
+  const amber = new Color('#E39A2A');
   /** @param {number} t */
   function update(t) {
     const step = Math.floor(t * 6);
-    all.forEach((p, i) => {
-      let c;
-      if (p.edge) c = (p.phase + step) % 3 === 0 ? on : off;
-      else c = Math.floor(t * 1.5) % 4 === 3 ? ((step + p.phase) % 7 < 4 ? warm : off) : on;
-      bulbs.setColorAt(i, c);
+    // A slow sparkle sweeping across the letters, and a chase around the border.
+    pixels.forEach((p, i) =>
+      bulbs.setColorAt(i, (p.column + step) % 5 === 0 || (i * 7 + step) % 23 === 0 ? white : warm),
+    );
+    border.forEach((p, i) => chasers.setColorAt(i, (p.phase + step) % 3 === 0 ? white : amber));
+    [bulbs, chasers].forEach((mesh) => {
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     });
-    if (bulbs.instanceColor) bulbs.instanceColor.needsUpdate = true;
   }
   return { group, update };
 }

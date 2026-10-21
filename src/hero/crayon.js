@@ -2,7 +2,7 @@
 // this full-screen shader redraws it on paper: hue-preserving posterised colour,
 // waxy coverage that skips the paper's grain, hatched strokes that follow the
 // luminance gradient near edges and run diagonally elsewhere, cross-hatching in
-// the darks, a little colour bleed, and wobbly ink outlines from a colour Sobel
+// the darks, a little colour bleed, glowing light sources with a halo, and wobbly ink outlines from a colour Sobel
 // and a depth Laplacian (on inverse depth, which is flat across any plane, so
 // the ground doesn't sprout contour lines). The stroke noise is reseeded a few times a second ("boil"); the
 // paper grain stays put.
@@ -31,6 +31,7 @@ uniform float uNear;
 uniform float uFar;
 uniform vec3 uPaper;
 uniform vec3 uInk;
+uniform vec3 uHalo;
 varying vec2 vUv;
 
 float hash(vec2 p) {
@@ -50,6 +51,8 @@ vec3 toSRGB(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 vec3 colAt(vec2 uv) { return toSRGB(texture2D(tColor, uv).rgb); }
+// Light sources (the marquee) write alpha 0; everything else writes 1.
+float glowAt(vec2 uv) { return 1.0 - texture2D(tColor, uv).a; }
 // 1 / view distance: affine in screen space across a plane.
 float invDepthAt(vec2 uv) {
   float z = texture2D(tDepth, uv).x;
@@ -114,9 +117,24 @@ void main() {
   float dark = smoothstep(0.45, 0.1, Lq) * smoothstep(0.45, 0.8, s2) * smoothstep(0.2, 0.7, grain + 0.3);
   col = mix(col, col * 0.62, dark);
 
+  // Light sources: a hatched halo around them, and no ink where they shine.
+  float glow = glowAt(uv);
+  float halo = 0.0;
+  for (int i = 0; i < 8; i++) {
+    vec2 d = vec2(cos(float(i) * 0.785398 + seed.x), sin(float(i) * 0.785398 + seed.x)) * uPx * texel;
+    halo += glowAt(uv + d * 3.5) + 0.5 * glowAt(uv + d * 7.5);
+  }
+  halo = clamp(halo / 9.0, 0.0, 1.0) * (1.0 - glow);
+  col = mix(col, uHalo, smoothstep(0.1, 0.8, halo) * (0.25 + 0.45 * s));
+  edge *= 1.0 - max(glow, smoothstep(0.15, 0.5, halo));
+
   // Wobbly ink outline, broken where the wax skips.
   float skip = smoothstep(0.2, 0.55, noise(css * vec2(0.6, 0.9) + seed) * 0.7 + grain * 0.6);
   col = mix(col, uInk, edge * skip * 0.92);
+
+  // The light itself: solid wax, warmed toward white, no paper showing through.
+  vec3 lit = mix(base, vec3(1.0, 0.98, 0.9), 0.3) * (0.95 + 0.08 * s);
+  col = mix(col, lit, glow);
 
   gl_FragColor = vec4(col, 1.0);
 }
@@ -143,6 +161,7 @@ export function createCrayonPass({ color, depth, near, far }) {
       uFar: { value: far },
       uPaper: { value: srgb(PAPER) },
       uInk: { value: srgb(INK) },
+      uHalo: { value: srgb('#FFB02E') },
     },
   });
   const scene = new Scene();

@@ -38,6 +38,7 @@ html-validate turns off three stylistic rules (`attr-quotes`, `doctype-style`, `
 
 - `#heroScene` holds the poster image and, once `hero.js` runs, the WebGL canvas. Its `data-state` is `poster`, `running`, `paused` (tab hidden or hero off-screen), `static` (prefers-reduced-motion: one still frame) or `fallback` (no WebGL2, so the poster stays). The canvas's `data-frames` counts rendered frames; the e2e suite reads both.
 - The scene is a pure function of time (`update(t)`), and the reduced-motion still and the posters use the same moment, so re-running `npm run poster` after a scene change keeps them matching.
+- Light sources (the SANDBOX marquee) use `glowMaterial()` from `scene.js`, which writes alpha 0 into the render target. The crayon pass draws those pixels at full colour with no ink and puts a hatched halo around them. Every other material must keep writing alpha 1.
 - Phones (`pickQuality` in `src/hero/quality.js`) get a smaller crowd, fewer particles, two searchlights and about 30 fps. The device pixel ratio is capped at 1.5.
 - `three` and `esbuild` are in `dependencies`, not `devDependencies`, because Vercel installs with `npm ci --omit=dev` and then runs the build.
 - `npm install` with npm 11 on Windows has dropped rolldown's and lightningcss's optional platform packages from `package-lock.json`, which breaks `npm ci` elsewhere. After changing dependencies, check that `"node_modules/@rolldown/binding-linux-x64-gnu"` is still in the lockfile.
