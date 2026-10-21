@@ -12,7 +12,7 @@ export default defineConfig({
       exclude: ['src/hero/main.js'],
       reporter: ['text', 'json-summary'],
       // Floor set at the level reached when CI was added. Raise it, never lower it.
-      thresholds: { lines: 97, functions: 100, branches: 89, statements: 97 },
+      thresholds: { lines: 98, functions: 100, branches: 92, statements: 98 },
     },
   },
 });

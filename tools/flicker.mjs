@@ -4,6 +4,8 @@
 //
 //   npm run flicker                      # desktop and mobile
 //   npm run flicker -- --save <dir>      # also save each run's middle frame
+//   npm run flicker -- --tier full       # force a quality tier (full, lite, software)
+//   npm run flicker -- --gpu             # the real GPU instead of SwiftShader
 //
 // Each device is measured twice: with the camera turning as it does on the
 // page ("turning"), and with the camera held at the start of each run while
@@ -92,14 +94,19 @@ export function schedule({ start = 0, period = 75, runs = 8, frames = 12 } = {})
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const saveAt = process.argv.indexOf('--save');
   const saveDir = saveAt > 0 ? process.argv[saveAt + 1] : null;
+  // --tier full|lite|software forces a quality tier; --gpu uses the real GPU
+  // (headless Chromium otherwise renders WebGL with SwiftShader on the CPU).
+  const tierAt = process.argv.indexOf('--tier');
+  const tier = tierAt > 0 ? `&hero-tier=${process.argv[tierAt + 1]}` : '';
+  const gpu = process.argv.includes('--gpu') ? ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist'] : [];
   build();
   const server = /** @type {import('node:http').Server} */ (await startServer(PORT));
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: gpu });
   try {
     for (const [name, device] of Object.entries(DEVICES)) {
       const context = await browser.newContext(device);
       const page = await context.newPage();
-      await page.goto(`http://127.0.0.1:${PORT}/?hero-debug`);
+      await page.goto(`http://127.0.0.1:${PORT}/?hero-debug${tier}`);
       await page.locator('#heroScene.ready').waitFor();
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(500);

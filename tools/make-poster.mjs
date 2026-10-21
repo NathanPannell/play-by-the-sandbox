@@ -15,8 +15,8 @@ const PORT = 4399;
 const out = (/** @type {string} */ name) => fileURLToPath(new URL(`../public/${name}`, import.meta.url));
 
 const shots = [
-  // Desktop: viewport height chosen so the hero is 1600x900 CSS px, saved at 1280x720.
-  { file: 'hero-poster.jpg', viewport: { width: 1600, height: 1010 }, deviceScaleFactor: 0.8, isMobile: false },
+  // Desktop: the hero fills a 1600x900 viewport, saved at 1280x720.
+  { file: 'hero-poster.jpg', viewport: { width: 1600, height: 900 }, deviceScaleFactor: 0.8, isMobile: false },
   { file: 'hero-poster-m.jpg', viewport: { width: 390, height: 844 }, deviceScaleFactor: 1.5, isMobile: true },
 ];
 
@@ -33,12 +33,14 @@ try {
       reducedMotion: 'reduce',
     });
     const page = await context.newPage();
-    await page.goto(`http://127.0.0.1:${PORT}/`);
+    // Force the tier the poster stands in for: headless Chromium renders with
+    // SwiftShader, which would otherwise get the software tier's low resolution.
+    await page.goto(`http://127.0.0.1:${PORT}/?hero-debug&hero-tier=${shot.isMobile ? 'lite' : 'full'}`);
     await page.locator('#heroScene[data-state="static"].ready').waitFor();
     // Let the fonts and the projector's slides land, then the canvas fade finish.
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(1500);
-    await page.addStyleTag({ content: '.hero-card{display:none!important}' });
+    await page.addStyleTag({ content: '.hud,.hud-scrim,.hud-callout{display:none!important}' });
     const hero = page.locator('#heroScene');
     await hero.screenshot({ path: out(shot.file), type: 'jpeg', quality: 66 });
     const box = await hero.boundingBox();

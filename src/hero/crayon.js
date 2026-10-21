@@ -43,10 +43,18 @@ uniform vec3 uInk;
 uniform vec3 uHalo;
 varying vec2 vUv;
 
+// Integer hash (PCG) of a lattice point. A float hash like
+// fract(p * 234.34) runs out of precision at the coordinates the grain uses
+// (thousands of cells), and its output falls into a repeating lattice that
+// shows as tiling seams, worst at high device pixel ratios.
+uint pcg(uint v) {
+  uint state = v * 747796405u + 2891336453u;
+  uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
+  return (word >> 22u) ^ word;
+}
 float hash(vec2 p) {
-  p = fract(p * vec2(234.34, 435.345));
-  p += dot(p, p + 34.23);
-  return fract(p.x * p.y);
+  uvec2 q = uvec2(ivec2(floor(p)) + 65536);
+  return float(pcg(q.x + pcg(q.y))) * (1.0 / 4294967295.0);
 }
 float noise(vec2 p) {
   vec2 i = floor(p);
@@ -68,9 +76,17 @@ float invDepthAt(vec2 uv) {
   return (uFar - z * (uFar - uNear)) / (uNear * uFar);
 }
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
+// The finest detail a pattern may have, in noise cells per CSS pixel: under
+// half a cell per device pixel. Finer value noise aliases against the pixel
+// grid into a moire that reads as tiling seams, at some pixel ratios and not
+// others.
+float band(float cellsPerCss) { return min(cellsPerCss, 0.45 * uPx); }
+// Grain lives in a rotated, offset copy of the plane, so its lattice never
+// lines up with the pixel grid either.
+vec2 tilt(vec2 p, float a) { return rot(a) * p + vec2(37.1, 91.7) * a; }
 float strokes(vec2 css, float angle, float offset) {
   vec2 r = rot(angle) * css;
-  return 0.62 * noise(vec2(r.x * 0.045, r.y * 0.75) + offset) + 0.38 * noise(vec2(r.x * 0.11, r.y * 1.7) + offset * 1.7);
+  return 0.62 * noise(vec2(r.x * 0.045, r.y * band(0.75)) + offset) + 0.38 * noise(vec2(r.x * 0.11, r.y * band(1.7)) + offset * 1.7);
 }
 // A staircase with soft risers: posterised, but with no hard step to flip.
 float softSteps(float x, float n) {
@@ -102,8 +118,12 @@ void main() {
   float colEdge = length(vec2(length(gxc), length(gyc)));
   float dc = invDepthAt(uv);
   float lap = abs(invDepthAt(uv + k * vec2(-1.0, 0.0)) + invDepthAt(uv + k * vec2(1.0, 0.0)) + invDepthAt(uv + k * vec2(0.0, -1.0)) + invDepthAt(uv + k * vec2(0.0, 1.0)) - 4.0 * dc);
+  #ifdef LITE
+  float depthEdge = lap / dc;
+  #else
   float lapX = abs(invDepthAt(uv + k * vec2(-1.0, -1.0)) + invDepthAt(uv + k * vec2(1.0, 1.0)) + invDepthAt(uv + k * vec2(1.0, -1.0)) + invDepthAt(uv + k * vec2(-1.0, 1.0)) - 4.0 * dc);
   float depthEdge = max(lap, lapX * 0.5) / dc;
+  #endif
   float edge = max(smoothstep(0.32, 0.75, colEdge), smoothstep(0.08, 0.22, depthEdge));
 
   // Posterise luminance, keep the hue, push the saturation a bit.
@@ -125,7 +145,7 @@ void main() {
   float s = mix(strokes(css, diagonal, 0.0), strokes(css, along, 0.0), follow);
 
   // Paper grain: crayon catches the tops of the tooth, misses the valleys.
-  float grain = 0.55 * noise(css * 0.75) + 0.33 * noise(css * 1.9 + 13.0) + 0.12 * noise(css * 0.2 + 5.0);
+  float grain = 0.55 * noise(tilt(css, 0.61) * band(0.75)) + 0.33 * noise(tilt(css, 1.13) * band(1.9) + 13.0) + 0.12 * noise(tilt(css, 2.29) * 0.2 + 5.0);
   float pressure = clamp(1.05 - Lq * 0.55, 0.25, 1.0);
   float cover = smoothstep(-0.06, 0.4, pressure * (0.5 + 0.7 * s) - grain * 0.6);
   vec3 col = mix(uPaper, wax * (0.9 + 0.2 * s), cover);
@@ -140,14 +160,18 @@ void main() {
   float halo = 0.0;
   for (int i = 0; i < 8; i++) {
     vec2 d = vec2(cos(float(i) * 0.785398 + 0.3), sin(float(i) * 0.785398 + 0.3)) * uPx * texel;
+    #ifdef LITE
+    halo += 1.5 * glowAt(uv + d * 4.5);
+    #else
     halo += glowAt(uv + d * 3.5) + 0.5 * glowAt(uv + d * 7.5);
+    #endif
   }
   halo = clamp(halo / 9.0, 0.0, 1.0) * (1.0 - glow);
   col = mix(col, uHalo, smoothstep(0.1, 0.8, halo) * (0.25 + 0.45 * s));
   edge *= 1.0 - max(glow, smoothstep(0.15, 0.5, halo));
 
   // Wobbly ink outline, broken where the wax skips.
-  float skip = smoothstep(0.15, 0.6, noise(css * vec2(0.6, 0.9) + 5.0) * 0.7 + grain * 0.6);
+  float skip = smoothstep(0.15, 0.6, noise(tilt(css, 0.37) * vec2(band(0.6), band(0.9)) + 5.0) * 0.7 + grain * 0.6);
   col = mix(col, uInk, edge * skip * 0.92);
 
   // The light itself: solid wax, warmed toward white, no paper showing through.
@@ -161,10 +185,13 @@ void main() {
 /**
  * The full-screen crayon pass. Call `setSize` with the render target's size in
  * device pixels and the device pixel ratio, and `setBoil` with the clock.
- * @param {{ color: import('three').Texture, depth: import('three').Texture, near: number, far: number }} input
+ * `lite` compiles a cheaper variant for phones and software renderers: one
+ * halo ring and a four-neighbour depth edge, about a third fewer texture reads.
+ * @param {{ color: import('three').Texture, depth: import('three').Texture, near: number, far: number, lite?: boolean }} input
  */
-export function createCrayonPass({ color, depth, near, far }) {
+export function createCrayonPass({ color, depth, near, far, lite = false }) {
   const material = new ShaderMaterial({
+    defines: lite ? { LITE: 1 } : {},
     vertexShader,
     fragmentShader,
     depthTest: false,

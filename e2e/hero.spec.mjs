@@ -5,16 +5,28 @@ import { measure } from '../tools/flicker.mjs';
 const frames = (page) =>
   page.locator('#heroScene canvas.hero-canvas').evaluate((c) => Number(/** @type {HTMLElement} */ (c).dataset.frames));
 
-test('the hero keeps the name, date, place and sign-up button over the scene', async ({ page }) => {
+test('the hero fills the screen, with the name, date, place and sign-up button as inlays', async ({ page }) => {
   await page.goto('/');
-  const card = page.locator('.hero-card');
-  await expect(card.locator('h1')).toContainText('Sandbox');
-  await expect(card).toContainText('January 2027');
-  await expect(card).toContainText('Vancouver Art Gallery');
-  const cta = card.getByRole('link', { name: /I wanna play/ });
+  const hero = page.locator('section.hero');
+  const size = page.viewportSize();
+  const box = await hero.boundingBox();
+  expect(box?.y).toBe(0);
+  expect(Math.round(box?.height ?? 0)).toBe(size?.height);
+  const title = page.locator('.hud-title');
+  await expect(title.locator('h1')).toContainText('Sandbox');
+  await expect(title).toContainText('January 2027 · Vancouver Art Gallery');
+  const cta = page.locator('.hud-bottom').getByRole('link', { name: /I wanna play/ });
   await expect(cta).toHaveAttribute('href', '#toys');
   await expect(cta).toBeInViewport();
+  await expect(page.locator('.hud-nav').getByRole('link', { name: /Apply/ })).toBeVisible();
   await expect(page.locator('#heroScene')).toHaveAttribute('role', 'img');
+  // Every inlay control is a comfortable tap target.
+  const small = await page
+    .locator('.hero a:visible, .hero button:visible')
+    .evaluateAll((els) =>
+      els.filter((el) => el.getBoundingClientRect().height < 44).map((el) => el.textContent?.trim()),
+    );
+  expect(small).toEqual([]);
 });
 
 test('the canvas mounts and keeps drawing the crayon scene', async ({ page }) => {
@@ -122,12 +134,14 @@ test('without WebGL the crayon poster stands in for the scene', async ({ page })
   const scene = page.locator('#heroScene');
   await expect(scene).toHaveAttribute('data-state', 'fallback');
   await expect(scene.locator('canvas')).toHaveCount(0);
+  // Nothing to pause without a scene.
+  await expect(page.locator('#heroPause')).toBeHidden();
   const poster = scene.locator('img.hero-poster');
   await expect(poster).toBeVisible();
   await expect
     .poll(() => poster.evaluate((img) => /** @type {HTMLImageElement} */ (img).naturalWidth))
     .toBeGreaterThan(300);
-  await expect(page.locator('.hero-card h1')).toBeVisible();
+  await expect(page.locator('.hud-title h1')).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -183,6 +197,7 @@ test.describe('at 375px wide', () => {
       () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
     );
     expect(overflow).toBeLessThanOrEqual(0);
-    await expect(page.locator('.hero-card').getByRole('link', { name: /I wanna play/ })).toBeInViewport();
+    await expect(page.locator('.hud-bottom').getByRole('link', { name: /I wanna play/ })).toBeInViewport();
+    await expect(page.locator('.hud-nav').getByRole('link', { name: /Apply/ })).toBeInViewport();
   });
 });

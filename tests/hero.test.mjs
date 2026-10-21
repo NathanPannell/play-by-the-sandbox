@@ -2,7 +2,16 @@ import { Color, DataTexture, InstancedMesh, Mesh, OneFactor, Texture, Vector3, Z
 import { describe, expect, it } from 'vitest';
 import { BOIL_SPEED, WOBBLE_PX, createCrayonPass } from '../src/hero/crayon.js';
 import { bulbLayout } from '../src/hero/marquee.js';
-import { MAX_DPR, SOFTWARE_SCALE, hash1, isSoftwareRenderer, pickQuality, rng } from '../src/hero/quality.js';
+import {
+  MAX_DPR,
+  MOBILE_DPR,
+  SOFTWARE_SCALE,
+  adaptScale,
+  hash1,
+  isSoftwareRenderer,
+  pickQuality,
+  rng,
+} from '../src/hero/quality.js';
 import { EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
@@ -80,6 +89,32 @@ describe('quality', () => {
       'Adreno (TM) 740',
     ])
       expect(isSoftwareRenderer(name), name).toBe(false);
+  });
+
+  it('caps phones at a lower pixel ratio', () => {
+    expect(MOBILE_DPR).toBe(1.25);
+    expect(phone.dpr).toBe(1.25);
+    expect(pickQuality({ width: 390, devicePixelRatio: 1 }).dpr).toBe(1);
+  });
+
+  it('adapts the render scale to the measured frame time, without hunting', () => {
+    const budget = 1000 / 30;
+    // Slow frames: down 15% at once, not below the floor.
+    expect(adaptScale({ scale: 1, interval: 60, budget, calm: 2, min: 0.55 })).toEqual({ scale: 0.85, calm: 0 });
+    expect(adaptScale({ scale: 0.6, interval: 60, budget, calm: 0, min: 0.55 })).toEqual({ scale: 0.55, calm: 0 });
+    // A little over budget: hold, and start counting calm windows again.
+    expect(adaptScale({ scale: 0.85, interval: budget * 1.2, budget, calm: 2, min: 0.55 })).toEqual({
+      scale: 0.85,
+      calm: 0,
+    });
+    // On budget: only after three calm windows does it step back up, never past 1.
+    let state = { scale: 0.85, calm: 0 };
+    state = adaptScale({ ...state, interval: budget, budget, min: 0.55 });
+    state = adaptScale({ ...state, interval: budget, budget, min: 0.55 });
+    expect(state).toEqual({ scale: 0.85, calm: 2 });
+    state = adaptScale({ ...state, interval: budget, budget, min: 0.55 });
+    expect(state).toEqual({ scale: 1, calm: 0 });
+    expect(adaptScale({ scale: 1, interval: budget, budget, calm: 5, min: 0.55 })).toEqual({ scale: 1, calm: 6 });
   });
 
   it('treats touch tablets as mobile', () => {
@@ -283,6 +318,33 @@ describe('scene', () => {
     }
   });
 
+  it('marks the marquee for the speech bubble, just under its corner', () => {
+    const world = buildScene(desktop);
+    const { marquee } = world.anchors;
+    const letters = /** @type {InstancedMesh} */ (world.scene.getObjectByName('marquee-letters'));
+    letters.geometry.computeBoundingBox();
+    expect(marquee.x).toBeGreaterThan(3);
+    expect(marquee.y).toBeLessThan(9.3);
+    expect(marquee.z).toBeGreaterThan(0);
+  });
+
+  it('keeps the influencers still and in one mesh on lighter devices', () => {
+    /** @param {import('three').Scene} scene */
+    const meshes = (scene) => {
+      let n = 0;
+      scene.traverse((o) => {
+        if (o instanceof Mesh && !(o instanceof InstancedMesh)) n++;
+      });
+      return n;
+    };
+    expect(meshes(buildScene(desktop).scene) - meshes(buildScene(phone).scene)).toBeGreaterThanOrEqual(8);
+    const world = buildScene(phone);
+    world.update(3);
+    const a = snapshot(world.scene);
+    world.update(3.5);
+    expect(snapshot(world.scene)).not.toEqual(a); // the crowd still moves
+  });
+
   it('shows the site ads on the projector wall when given them', () => {
     const ads = new Texture();
     const world = buildScene(desktop, { adTexture: ads });
@@ -337,6 +399,28 @@ describe('crayon pass', () => {
     expect(boil(4096 / BOIL_SPEED + 1)).toBeLessThan(1);
     expect(pass.material.uniforms.uWobble.value).toBe(WOBBLE_PX);
     expect(WOBBLE_PX).toBeLessThanOrEqual(2.5);
+  });
+
+  it('has a lighter variant for phones and software renderers', () => {
+    const lite = createCrayonPass({
+      color: new DataTexture(),
+      depth: new DataTexture(),
+      near: 0.5,
+      far: 260,
+      lite: true,
+    });
+    expect(lite.material.defines).toEqual({ LITE: 1 });
+    expect(pass.material.defines).toEqual({});
+    expect(lite.material.fragmentShader).toContain('#ifdef LITE');
+    lite.dispose();
+  });
+
+  it('keeps its grain finer than the pixels can show from aliasing into seams', () => {
+    const shader = pass.material.fragmentShader;
+    // An integer hash (no float-precision lattice), band-limited and tilted noise.
+    expect(shader).toContain('uint pcg(uint v)');
+    expect(shader).toMatch(/float band\(float cellsPerCss\) \{ return min\(cellsPerCss, 0\.45 \* uPx\); \}/);
+    expect(shader).toMatch(/noise\(tilt\(css, [\d.]+\) \* band\(1\.9\)/);
   });
 
   it('cleans up', () => {
