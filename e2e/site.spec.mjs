@@ -44,10 +44,13 @@ test('the page animates, and holds still for reduced motion', async ({ page }) =
     page.evaluate(
       () => document.getAnimations().filter((a) => a.playState === 'running' || a.playState === 'finished').length,
     );
+  // The crayon draw-ins run, and the hero's 3D scene is playing (e2e/hero.spec.mjs covers it in depth).
   expect(await animated()).toBeGreaterThan(0);
+  await expect(page.locator('#heroScene')).toHaveAttribute('data-state', 'running');
 
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.reload();
+  await expect(page.locator('#heroScene')).toHaveAttribute('data-state', 'static');
   const running = await page.evaluate(
     () =>
       document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getTiming().iterations === Infinity)
