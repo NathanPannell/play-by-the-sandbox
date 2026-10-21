@@ -1,4 +1,5 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -33,4 +34,12 @@ describe('vercel ignore step', () => {
   it.each(['ci/pipeline', 'feat/x', 'dependabot/npm'])('skips %s, so there are no preview deployments', (ref) =>
     expect(shouldBuild(ref)).toBe(false),
   );
+
+  // Vercel builds on exit 1 and skips on exit 0.
+  /** @param {string} ref */
+  const exitCode = (ref) =>
+    spawnSync(process.execPath, ['scripts/vercel-ignore.mjs'], { env: { ...process.env, VERCEL_GIT_COMMIT_REF: ref } })
+      .status;
+  it.each(['main', 'staging'])('exits 1 (build) for %s', (ref) => expect(exitCode(ref)).toBe(1));
+  it('exits 0 (skip) for other branches', () => expect(exitCode('feat/x')).toBe(0));
 });

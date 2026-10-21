@@ -6,5 +6,5 @@ dist/
 coverage/
 test-results/
 playwright-report/
-.claude/tmp/
+.claude/
 .codex/tmp/

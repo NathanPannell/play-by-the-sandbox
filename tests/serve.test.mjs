@@ -61,5 +61,6 @@ describe('local server', () => {
   it('never resolves paths outside dist/', () => {
     expect(resolveFile('/../package.json')).toBeNull();
     expect(resolveFile('/%2e%2e/package.json')).toBeNull();
+    expect(resolveFile('/%E0')).toBeNull();
   });
 });

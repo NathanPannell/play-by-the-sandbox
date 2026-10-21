@@ -19,7 +19,13 @@ const TYPES = {
 
 /** @param {string} pathname */
 export function resolveFile(pathname) {
-  const rel = normalize(decodeURIComponent(pathname)).replace(/^[\\/]+/, '');
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  const rel = normalize(decoded).replace(/^[\\/]+/, '');
   if (rel.startsWith('..')) return null;
   const file = join(root, rel === '' || rel === '.' ? 'index.html' : rel);
   return existsSync(file) && statSync(file).isFile() ? file : null;
