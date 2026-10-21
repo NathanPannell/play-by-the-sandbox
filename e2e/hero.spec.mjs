@@ -134,6 +134,8 @@ test('without WebGL the crayon poster stands in for the scene', async ({ page })
   const scene = page.locator('#heroScene');
   await expect(scene).toHaveAttribute('data-state', 'fallback');
   await expect(scene.locator('canvas')).toHaveCount(0);
+  // Nothing to pause without a scene.
+  await expect(page.locator('#heroPause')).toBeHidden();
   const poster = scene.locator('img.hero-poster');
   await expect(poster).toBeVisible();
   await expect

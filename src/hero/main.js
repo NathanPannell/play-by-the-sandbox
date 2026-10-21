@@ -80,6 +80,8 @@ function start(root) {
   let windowStart = 0;
   let windowFrames = 0;
   let lastDrawn = 0;
+  let fullScaleInterval = 0;
+  let adapting = true;
 
   const ads = adTexture(() => {
     // Redraw a held frame with the slides; the first paint happens during setup, before the scene exists.
@@ -121,6 +123,7 @@ function start(root) {
   const anchor = world.anchors.marquee.clone();
   let calloutAt = '';
   let calloutWidth = 0;
+  document.fonts?.ready.then(() => (calloutWidth = 0));
   function placeCallout() {
     if (!callout) return;
     anchor.copy(world.anchors.marquee).project(world.camera);
@@ -191,12 +194,25 @@ function start(root) {
     const interval = (now - windowStart) / windowFrames;
     windowStart = now;
     windowFrames = 0;
+    if (!adapting) return;
+    if (scale === 1) fullScaleInterval = interval;
+    const min = Math.max(0.55, 0.5 / quality.dpr);
+    if (scale <= min && fullScaleInterval && interval > fullScaleInterval * 0.9) {
+      // The floor didn't help, so frames are held back by the display (a
+      // 30 Hz cap in Low Power Mode or Energy Saver), not by the GPU.
+      adapting = false;
+      scale = 1;
+      root.dataset.scale = '1';
+      renderer.setPixelRatio(quality.dpr);
+      resize();
+      return;
+    }
     const next = adaptScale({
       scale,
       interval,
       budget: (1000 / 60) * (quality.frameSkip + 1),
       calm,
-      min: Math.max(0.55, 0.5 / quality.dpr),
+      min,
     });
     calm = next.calm;
     if (next.scale !== scale) {
@@ -237,7 +253,6 @@ function start(root) {
   /** @param {boolean} still */
   function showChoice(still) {
     if (!toggle) return;
-    toggle.setAttribute('aria-pressed', String(still));
     toggle.setAttribute('aria-label', still ? 'Play the scene' : 'Pause the scene');
     const label = toggle.querySelector('.hud-pause-label');
     if (label) label.textContent = still ? 'Play' : 'Pause';
@@ -263,6 +278,7 @@ function start(root) {
     raf = 0;
     mode = 'paused';
     root.classList.remove('ready');
+    if (callout) callout.hidden = true;
     setState('fallback');
   });
   canvas.addEventListener('webglcontextrestored', () => {
