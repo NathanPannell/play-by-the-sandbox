@@ -1,0 +1,84 @@
+import { expect, test } from '@playwright/test';
+
+const FORM = 'https://docs.google.com/forms/d/e/1FAIpQLScog6xEbmoeSFbAxWkzlkKT9GZ2bfAtfq8gVGeI10vezy11ag/viewform';
+
+test('the page loads with its title, share card and no errors', async ({ page }) => {
+  /** @type {string[]} */
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+
+  await page.goto('/');
+  await expect(page).toHaveTitle('Play by the Sandbox | Vancouver Creative Event, Jan 2027');
+  await expect(page.locator('h1')).toBeVisible();
+  await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+    'content',
+    'https://www.playbythesandbox.ca/api/og?v=2',
+  );
+  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://playbythesandbox.ca/');
+  await page.waitForLoadState('networkidle');
+  expect(errors).toEqual([]);
+});
+
+test('the apply button links to the sign-up form', async ({ page }) => {
+  await page.goto('/');
+  const cta = page.locator('#roleCta');
+  await cta.scrollIntoViewIfNeeded();
+  await expect(cta).toBeVisible();
+  await expect(cta).toHaveAttribute('href', FORM);
+  await expect(cta).toHaveAttribute('target', '_blank');
+});
+
+test('in-page navigation targets exist', async ({ page }) => {
+  await page.goto('/');
+  const hrefs = await page.locator('a[href^="#"]').evaluateAll((as) => as.map((a) => a.getAttribute('href')));
+  expect(hrefs.length).toBeGreaterThan(0);
+  for (const href of new Set(hrefs)) {
+    await expect(page.locator(String(href)), `${href} target`).toHaveCount(1);
+  }
+});
+
+test('the page animates, and holds still for reduced motion', async ({ page }) => {
+  await page.goto('/');
+  const animated = () =>
+    page.evaluate(
+      () => document.getAnimations().filter((a) => a.playState === 'running' || a.playState === 'finished').length,
+    );
+  expect(await animated()).toBeGreaterThan(0);
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.reload();
+  const running = await page.evaluate(
+    () =>
+      document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getTiming().iterations === Infinity)
+        .length,
+  );
+  expect(running).toBe(0);
+});
+
+test('nothing overflows the viewport horizontally', async ({ page }) => {
+  await page.goto('/');
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('icons, manifest, robots and sitemap are served', async ({ page, request }) => {
+  await page.goto('/');
+  const links = await page
+    .locator('link[rel~="icon"], link[rel="apple-touch-icon"], link[rel="manifest"]')
+    .evaluateAll((ls) => ls.map((l) => l.getAttribute('href')));
+  for (const path of [...links, '/robots.txt', '/sitemap.xml']) {
+    const res = await request.get(String(path));
+    expect(res.status(), String(path)).toBe(200);
+  }
+  expect(await (await request.get('/robots.txt')).text()).toContain('Sitemap: https://playbythesandbox.ca/sitemap.xml');
+});
+
+test('the share card image renders', async ({ request }) => {
+  const res = await request.get('/api/og');
+  expect(res.status()).toBe(200);
+  expect(res.headers()['content-type']).toBe('image/png');
+  expect((await res.body()).length).toBeGreaterThan(10000);
+});
