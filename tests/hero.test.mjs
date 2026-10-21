@@ -2,7 +2,7 @@ import { Color, DataTexture, InstancedMesh, Mesh, OneFactor, Texture, Vector3, Z
 import { describe, expect, it } from 'vitest';
 import { BOIL_SPEED, WOBBLE_PX, createCrayonPass } from '../src/hero/crayon.js';
 import { bulbLayout } from '../src/hero/marquee.js';
-import { MAX_DPR, hash1, pickQuality, rng } from '../src/hero/quality.js';
+import { MAX_DPR, SOFTWARE_SCALE, hash1, isSoftwareRenderer, pickQuality, rng } from '../src/hero/quality.js';
 import { EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
@@ -56,6 +56,30 @@ describe('quality', () => {
     // Antialiasing, so thin things don't crawl as the camera turns.
     expect(desktop.msaa).toBe(4);
     expect(phone.msaa).toBe(2);
+  });
+
+  it('gives software WebGL a phone-sized scene at reduced resolution, without antialiasing', () => {
+    const cpu = pickQuality({ width: 1440, devicePixelRatio: 2, software: true });
+    expect(cpu.mobile).toBe(false);
+    expect(cpu.lite).toBe(true);
+    expect(cpu.dpr).toBe(SOFTWARE_SCALE);
+    expect(cpu.msaa).toBe(0);
+    expect(cpu.frameSkip).toBe(2);
+    expect(cpu.crowd).toBe(phone.crowd);
+    expect(desktop.lite).toBe(false);
+    expect(phone.lite).toBe(true);
+    for (const name of [
+      'ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)',
+      'llvmpipe (LLVM 15.0.7, 256 bits)',
+      'ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0)',
+    ])
+      expect(isSoftwareRenderer(name), name).toBe(true);
+    for (const name of [
+      'ANGLE (NVIDIA, NVIDIA GeForce RTX 3060 Direct3D11 vs_5_0 ps_5_0, D3D11)',
+      'Apple M2',
+      'Adreno (TM) 740',
+    ])
+      expect(isSoftwareRenderer(name), name).toBe(false);
   });
 
   it('treats touch tablets as mobile', () => {

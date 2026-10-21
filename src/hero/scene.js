@@ -218,7 +218,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
   scene.add(robsonSquare(random));
   scene.add(eastSide());
   scene.add(acrossTheStreet(random));
-  scene.add(skyline(random, quality.mobile ? 26 : 44));
+  scene.add(skyline(random, quality.lite ? 26 : 44));
 
   const marquee = marqueeSign();
   scene.add(marquee.group);
@@ -229,7 +229,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
   const lights = searchlights(quality.searchlights);
   scene.add(lights.group);
 
-  const people = crowd(quality.crowd, quality.mobile ? 6 : 12, random);
+  const people = crowd(quality.crowd, quality.lite ? 6 : 12, random);
   scene.add(people.group);
 
   const stars = influencers(random);
@@ -238,7 +238,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
   const limos = [limo(PINK), limo('#FFFFFF')];
   limos.forEach((l) => scene.add(l.group));
 
-  const flashes = flashBulbs([...people.emitters, ...stars.emitters], quality.mobile ? 14 : 22);
+  const flashes = flashBulbs([...people.emitters, ...stars.emitters], quality.lite ? 14 : 22);
   scene.add(flashes.mesh);
 
   const paper = confetti(quality.confetti, random);

@@ -15,7 +15,7 @@ import {
 } from 'three';
 import { createCrayonPass } from './crayon.js';
 import { BLUE, INK, PAPER, RED, YELLOW } from './palette.js';
-import { pickQuality } from './quality.js';
+import { isSoftwareRenderer, pickQuality } from './quality.js';
 import { STILL_T, buildScene } from './scene.js';
 
 /** Where the running animation starts: a few seconds before the view turns to face the gallery. */
@@ -38,10 +38,13 @@ function start(root) {
     return setState('fallback');
   }
 
+  const gl = renderer.getContext();
+  const info = gl.getExtension('WEBGL_debug_renderer_info');
   const quality = pickQuality({
     width: window.innerWidth,
     devicePixelRatio: window.devicePixelRatio,
     coarsePointer: window.matchMedia('(pointer: coarse)').matches,
+    software: isSoftwareRenderer(String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))),
   });
   const canvas = renderer.domElement;
   canvas.className = 'hero-canvas';
@@ -115,7 +118,7 @@ function start(root) {
     const dt = last ? Math.min((now - last) / 1000, 0.1) : 0;
     last = now;
     t += dt;
-    // Phones draw every other frame (about 30 fps).
+    // Phones draw every other frame (about 30 fps), software renderers every third.
     if (quality.frameSkip && tick++ % (quality.frameSkip + 1)) return;
     draw(t);
   }
@@ -170,6 +173,9 @@ function start(root) {
         debug = true;
         cancelAnimationFrame(raf);
         raf = 0;
+        // Held, so a resize redraws this moment instead of leaving the canvas blank.
+        mode = 'paused';
+        t = at;
         draw(at, cameraAt);
         return canvas;
       },
