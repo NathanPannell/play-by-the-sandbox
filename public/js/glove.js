@@ -1,8 +1,11 @@
 // The cartoon glove cursor: an old rubber-hose, four-finger white glove drawn
 // in crayon that follows the mouse with a slight lag and tilt. It waves open
-// over the page, points at links and buttons, and squashes into a grab on
-// click. Only for fine pointers; touch, text fields and reduced motion keep
-// the native cursor. Self-contained, so any page can add it with
+// over the page, points at links, buttons and drop-down options, holds a
+// crayon over text fields (its tip is the hotspot; the caret shows where text
+// goes) and squashes into a grab on click. It stays on everywhere a page can
+// draw: only scrollbars and other documents (iframes) get the native cursor
+// back, because no page cursor can cover them. Only for fine pointers; touch and reduced motion keep the
+// native cursor. Self-contained, so any page can add it with
 // <script src='/js/glove.js' defer></script>.
 (function () {
   if (!window.matchMedia || document.querySelector('.glove')) return;
@@ -11,7 +14,7 @@
 
   // The fingertip, in CSS px from the glove's top-left corner (viewBox 64x84 at 40x52.5).
   var HX = 10, HY = 2.5;
-  var INTERACTIVE = 'a[href], button, [role="button"], label, summary, select, input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], input[type="file"], input[type="range"], input[type="color"]';
+  var INTERACTIVE = 'a[href], button, [role="button"], [role="combobox"], [role="option"], label, summary, select, input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"], input[type="file"], input[type="range"], input[type="color"], input[type="image"]';
   var TEXTY = 'input, textarea, [contenteditable=""], [contenteditable="true"]';
 
   // Each pose is drawn twice: fat ink strokes underneath, white ones on top,
@@ -33,29 +36,37 @@
   var OPEN = puff(PALM + line('M28 38 L17 10') + line('M36 35 L34 6') + line('M43 37 L49 12') + line('M24 51 L10 39'), '16', '10') + STITCH;
   var POINT = puff(PALM + line('M30 40 L17 8') + '<circle cx="40" cy="34" r="6"/><circle cx="46" cy="41" r="6"/>', '16', '10') +
     THUMB_FRONT + '<path d="M41.5 40 L43 43" fill="none" stroke="var(--ink, #3a3342)" stroke-width="2" stroke-linecap="round"/>';
-  var GRAB = puff(PALM + '<circle cx="24" cy="34" r="6.5"/><circle cx="33" cy="30" r="6.5"/><circle cx="42" cy="32" r="6.5"/>', '16', '10') +
+  var KNUCKLES = '<circle cx="24" cy="34" r="6.5"/><circle cx="33" cy="30" r="6.5"/><circle cx="42" cy="32" r="6.5"/>';
+  var GRAB = puff(PALM + KNUCKLES, '16', '10') +
     THUMB_TUCK + '<path d="M28.5 35 L29.5 39.5 M37.5 33 L37.5 37.5" fill="none" stroke="var(--ink, #3a3342)" stroke-width="2" stroke-linecap="round"/>';
+  // Over text fields: a rose crayon held in the fist, its tip up and left on the hotspot.
+  var CRAYON = '<path d="M20.1 10.9 L36 37.4" stroke="var(--ink, #3a3342)" stroke-width="11.5"/>' +
+    '<path d="M20.1 10.9 L36 37.4" stroke="var(--rose-deep, #eb9cad)" stroke-width="6.5"/>' +
+    '<path d="M15.7 3.6 L25 7.9 L15.2 13.9 Z" fill="var(--rose-ink, #ad4660)" stroke="var(--ink, #3a3342)" stroke-width="2.4" stroke-linejoin="round"/>' +
+    '<path d="M23.3 23 L29.3 19.4 M26.4 28.1 L32.4 24.5" stroke="var(--ink, #3a3342)" stroke-width="1.8" stroke-linecap="round"/>';
+  var WRITE = puff(PALM + KNUCKLES, '16', '10') + CRAYON + THUMB_TUCK;
 
   var css = '.glove{position:fixed;left:0;top:0;z-index:2147483000;width:40px;height:52.5px;pointer-events:none;opacity:0;transform-origin:' + HX + 'px ' + HY + 'px;will-change:transform;transition:opacity .15s ease}' +
     '.glove.show{opacity:1}' +
     '.glove-in{width:100%;height:100%;transform-origin:' + HX + 'px ' + HY + 'px;transition:transform .22s cubic-bezier(.3,1.8,.5,1)}' +
     '.glove svg{display:block;width:100%;height:100%;overflow:visible;filter:url(#crayonSoft) drop-shadow(2px 3px 0 rgba(58,51,66,.18))}' +
     '.glove g[data-pose]{display:none}' +
-    '.glove[data-pose="open"] g[data-pose="open"],.glove[data-pose="point"] g[data-pose="point"],.glove[data-pose="grab"] g[data-pose="grab"]{display:inline}' +
+    '.glove[data-pose="open"] g[data-pose="open"],.glove[data-pose="point"] g[data-pose="point"],.glove[data-pose="grab"] g[data-pose="grab"],.glove[data-pose="write"] g[data-pose="write"]{display:inline}' +
     '.glove.press .glove-in{transform:scale(1.14,.8);transition-duration:.07s}' +
-    'html.glove-on,html.glove-on *{cursor:none !important}' +
-    'html.glove-on :is(input, textarea, [contenteditable=""], [contenteditable="true"]){cursor:auto !important}';
+    // Text fields too: the glove holds a crayon there, so no I-beam on top of it.
+    'html.glove-on,html.glove-on *,html.glove-on *::before,html.glove-on *::after{cursor:none !important}' +
+    'html.glove-on ::file-selector-button{cursor:none !important}';
 
   var el = document.createElement('div');
   el.className = 'glove';
   el.setAttribute('aria-hidden', 'true');
   el.dataset.pose = 'open';
   el.innerHTML = '<div class="glove-in"><svg viewBox="0 0 64 84" focusable="false">' +
-    '<g data-pose="open">' + OPEN + '</g><g data-pose="point">' + POINT + '</g><g data-pose="grab">' + GRAB + '</g>' + CUFF + '</svg></div>';
+    '<g data-pose="open">' + OPEN + '</g><g data-pose="point">' + POINT + '</g><g data-pose="grab">' + GRAB + '</g><g data-pose="write">' + WRITE + '</g>' + CUFF + '</svg></div>';
   var style = document.createElement('style');
   style.textContent = css;
 
-  var on = false, shown = false, pressed = false, over = false;
+  var on = false, shown = false, pressed = false, over = false, typing = false;
   var tx = 0, ty = 0, x = 0, y = 0, tilt = 0, raf = 0;
 
   function frame() {
@@ -77,17 +88,28 @@
     el.classList.toggle('show', v);
     document.documentElement.classList.toggle('glove-on', v);
   }
-  function pose() { el.dataset.pose = pressed ? 'grab' : over ? 'point' : 'open'; }
+  function pose() { el.dataset.pose = pressed ? 'grab' : over ? 'point' : typing ? 'write' : 'open'; }
 
   /** @param {EventTarget | null} t @param {string} sel */
   function closest(t, sel) {
     return t instanceof Element ? t.closest(sel) : null;
   }
 
+  // So are the scrollbars of scrolling boxes in the page (a long list, a textarea).
+  /** @param {PointerEvent} e */
+  function onScrollbar(e) {
+    var t = e.target;
+    if (!(t instanceof Element) || t === document.documentElement || t === document.body) return false;
+    var r = t.getBoundingClientRect();
+    var x = e.clientX - r.left - t.clientLeft, y = e.clientY - r.top - t.clientTop;
+    return (t.scrollHeight > t.clientHeight && x > t.clientWidth) || (t.scrollWidth > t.clientWidth && y > t.clientHeight);
+  }
   /** @param {PointerEvent} e */
   function move(e) {
     if (e.pointerType === 'touch') { show(false); return; }
-    if (closest(e.target, TEXTY) && !closest(e.target, INTERACTIVE)) { show(false); return; }
+    // The root scrollbars belong to the browser: no page cursor can hide the arrow there.
+    var de = document.documentElement;
+    if (e.clientX >= de.clientWidth || e.clientY >= de.clientHeight || onScrollbar(e)) { show(false); return; }
     tx = e.clientX; ty = e.clientY;
     if (!shown) { x = tx; y = ty; tilt = 0; }
     show(true);
@@ -96,6 +118,7 @@
   /** @param {PointerEvent} e */
   function hover(e) {
     over = !!closest(e.target, INTERACTIVE);
+    typing = !over && !!closest(e.target, TEXTY);
     pose();
   }
   /** @param {PointerEvent} e */
@@ -106,7 +129,7 @@
   function up() { pressed = false; el.classList.remove('press'); pose(); }
   function away() { show(false); up(); }
   /** @param {MouseEvent} e */
-  function leave(e) { if (!e.relatedTarget) away(); }
+  function leave(e) { if (!e.relatedTarget || e.relatedTarget instanceof HTMLIFrameElement) away(); }
 
   function enable() {
     on = true;
