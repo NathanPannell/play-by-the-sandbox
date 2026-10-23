@@ -27,7 +27,6 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
   '.xml': 'application/xml',
   '.webmanifest': 'application/manifest+json',
-  '.css': 'text/css; charset=utf-8',
 };
 
 /** @type {Record<string, Record<string, (request: Request) => Promise<Response>>>} */

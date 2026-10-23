@@ -1,12 +1,21 @@
 // Renders the apply pages (/apply/creator, /apply/brand) and the team's review
 // page (/apply/review) to static HTML at build time, from the configs in
 // forms.js. The browser scripts (client.js, review-client.js) add behaviour on
-// top. Styles live in public/apply/apply.css.
+// top. Styles live in public/apply/apply.css, on the site's palette
+// (public/styles/tokens.css).
 import { PHOTO } from './forms.js';
 
 const SITE = 'https://playbythesandbox.ca';
 const FONTS =
   'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&amp;family=Chewy&amp;family=Gaegu:wght@400;700&amp;display=swap';
+
+// The home page's crayon filters (public/index.html): #crayonType draws the
+// headings, #crayonSoft the reading text. CSS can't reference a filter in
+// another file, so each page carries its own copy.
+const CRAYON_FILTERS = `<svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false"><defs>
+<filter id="crayonType" x="-6%" y="-20%" width="112%" height="145%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="7" result="warp"/><feDisplacementMap in="SourceGraphic" in2="warp" scale="3.4" xChannelSelector="R" yChannelSelector="G" result="wob"/><feTurbulence type="fractalNoise" baseFrequency="0.8 0.24" numOctaves="3" seed="12" result="grain"/><feColorMatrix in="grain" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2.6 2.2" result="mask"/><feComposite in="wob" in2="mask" operator="in"/></filter>
+<filter id="crayonSoft" x="-4%" y="-20%" width="108%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="1" seed="5" result="warp"/><feDisplacementMap in="SourceGraphic" in2="warp" scale="1.3" xChannelSelector="R" yChannelSelector="G" result="wob"/><feTurbulence type="fractalNoise" baseFrequency="1.2 0.4" numOctaves="2" seed="21" result="grain"/><feColorMatrix in="grain" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.55" result="mask"/><feComposite in="wob" in2="mask" operator="in"/></filter>
+</defs></svg>`;
 
 /** @param {unknown} s */
 export function esc(s) {
@@ -33,7 +42,7 @@ function layout(page) {
 <meta name="description" content="${esc(page.description)}">
 <meta name="robots" content="${page.index ? 'index, follow' : 'noindex, nofollow'}">
 <link rel="canonical" href="${url}">
-<meta name="theme-color" content="#FFFCF5">
+<meta name="theme-color" content="#fff8ef">
 <link rel="icon" type="image/svg+xml" href="/logo.svg">
 <link rel="icon" type="image/png" sizes="48x48" href="/favicon-48.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -47,9 +56,11 @@ function layout(page) {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="${FONTS}">
+<link rel="stylesheet" href="/styles/tokens.css">
 <link rel="stylesheet" href="/apply/apply.css">
 </head>
 <body ${page.bodyAttrs}>
+${CRAYON_FILTERS}
 <a class="skip" href="#main">Skip to content</a>
 <header class="top">
 <a class="home" href="/"><img src="/wordmark.svg" alt="Sandbox, back to the home page" width="176" height="40"></a>
@@ -60,6 +71,7 @@ ${page.main}
 </main>
 <footer class="foot hand">Play by the Sandbox · Vancouver Art Gallery North Plaza · January 2027</footer>
 <script type="module" src="${page.script}"></script>
+<script src="/js/glove.js" defer></script>
 </body>
 </html>
 `;
@@ -163,7 +175,7 @@ ${sections}
 </form>`;
 }
 
-const DOODLE = `<svg class="doodle" viewBox="0 0 220 120" aria-hidden="true"><g fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20 92 C 60 60, 90 110, 130 80 S 190 50, 205 70" stroke="#2FA84F" stroke-width="7"/><path d="M48 30 l8 18 l19 2 l-14 13 l4 19 l-17 -9 l-17 9 l4 -19 l-14 -13 l19 -2 z" stroke="#17151A" stroke-width="4" fill="#F5C518"/><circle cx="160" cy="34" r="16" stroke="#17151A" stroke-width="4" fill="#F49AA8"/><path d="M110 20 l6 10 M128 14 l-2 12 M100 40 l12 2" stroke="#E5322D" stroke-width="5"/></g></svg>`;
+const DOODLE = `<svg class="doodle" viewBox="0 0 220 120" aria-hidden="true"><g fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M20 92 C 60 60, 90 110, 130 80 S 190 50, 205 70" style="stroke: var(--mint-ink)" stroke-width="7"/><path d="M48 30 l8 18 l19 2 l-14 13 l4 19 l-17 -9 l-17 9 l4 -19 l-14 -13 l19 -2 z" style="stroke: var(--ink); fill: var(--butter)" stroke-width="4"/><circle cx="160" cy="34" r="16" style="stroke: var(--ink); fill: var(--rose)" stroke-width="4"/><path d="M110 20 l6 10 M128 14 l-2 12 M100 40 l12 2" style="stroke: var(--rose-ink)" stroke-width="5"/></g></svg>`;
 
 /** @param {import('./forms.js').Form} form */
 export function renderApplyPage(form) {

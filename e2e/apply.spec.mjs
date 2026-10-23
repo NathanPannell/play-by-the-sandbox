@@ -151,9 +151,12 @@ test('a brand applies, and the team reviews it', async ({ page }) => {
 });
 
 for (const path of ['/apply/creator', '/apply/brand', '/apply/review']) {
-  test(`${path} fits the screen without sideways scrolling`, async ({ page }) => {
+  test(`${path} fits the screen and uses the site's palette`, async ({ page }) => {
     await page.goto(path);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
+    // On the site's palette (/styles/tokens.css), with headings in crayon.
+    expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(255, 248, 239)');
+    expect(await page.locator('h1').evaluate((h) => getComputedStyle(h).filter)).toBe('url("#crayonType")');
   });
 }
