@@ -24,9 +24,16 @@ const unique = (/** @type {string} */ name) => `${name} ${test.info().project.na
  * @param {import('@playwright/test').Page | import('@playwright/test').Locator} scope
  * @param {string | RegExp} name @param {string} option
  */
-async function pick(scope, name, option) {
-  await scope.getByRole('combobox', { name }).click();
-  await scope.getByRole('option', { name: option, exact: true }).click();
+async function pick(scope, name, option, tap = false) {
+  const box = scope.getByRole('combobox', { name });
+  const opt = scope.getByRole('option', { name: option, exact: true });
+  if (tap) {
+    await box.tap();
+    await opt.tap();
+  } else {
+    await box.click();
+    await opt.click();
+  }
 }
 
 test('the creator toy on the home page opens the creator form', async ({ page }) => {
@@ -205,7 +212,7 @@ for (const path of ['/apply/creator', '/apply/brand']) {
   });
 }
 
-test('the drop-downs are pastel listboxes that work from the keyboard, like a select', async ({ page }) => {
+test('the drop-downs are pastel listboxes that work from the keyboard, like a select', async ({ page, isMobile }) => {
   await page.goto('/apply/brand');
   // The OS's select list never opens: the selects are hidden, holding the values.
   expect(
@@ -217,8 +224,10 @@ test('the drop-downs are pastel listboxes that work from the keyboard, like a se
   await expect(box).toHaveText('Choose one…');
 
   // Required and empty: the same error, mirrored onto the combobox, and focus lands there when it's first.
+  await page.getByLabel('Brand name').fill('Crayon Co');
   await page.getByRole('button', { name: 'Send my application' }).click();
   await expect(box).toHaveAttribute('aria-invalid', 'true');
+  await expect(box).toBeFocused();
   const describedBy = String(await box.getAttribute('aria-describedby'));
   await expect(page.locator(`[data-field="category"] .err`)).toHaveText(/./);
   expect(describedBy).toContain(String(await page.locator('[data-field="category"] .err').getAttribute('id')));
@@ -255,9 +264,25 @@ test('the drop-downs are pastel listboxes that work from the keyboard, like a se
   await page.keyboard.press('Home');
   await expect(list.locator('.lb-active')).toHaveText('Choose one…');
   await page.keyboard.press('Escape');
+  // Closed: End opens on the last option; Tab chooses the highlighted one and moves on, like a select.
+  await page.keyboard.press('End');
+  await expect(box).toHaveAttribute('aria-expanded', 'true');
+  await expect(list.locator('.lb-active')).toHaveText('Something else');
+  await page.keyboard.press('Tab');
+  await expect(select).toHaveValue('Something else');
+  await expect(box).not.toBeFocused();
+  // Alt+Down opens, Alt+Up chooses and closes; typing a word jumps to it.
+  await box.focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect(box).toHaveAttribute('aria-expanded', 'true');
+  await page.keyboard.type('fo');
+  await expect(list.locator('.lb-active')).toHaveText('Food & drink');
+  await page.keyboard.press('Alt+ArrowUp');
+  await expect(box).toHaveAttribute('aria-expanded', 'false');
+  await expect(select).toHaveValue('Food & drink');
 
-  // And with a pointer or a finger.
-  await pick(page, /^Stage/, 'Growing (1 to 3 years)');
+  // And with a pointer, or a finger on phones.
+  await pick(page, /^Stage/, 'Growing (1 to 3 years)', isMobile);
   await expect(page.locator('select[name="stage"]')).toHaveValue('Growing (1 to 3 years)');
 });
 
@@ -279,6 +304,10 @@ test.describe('the glove on the forms', () => {
       await expect(glove).toHaveAttribute('data-pose', pose);
       expect(await field.evaluate((el) => getComputedStyle(el).cursor)).toBe('none');
     }
+    // The file picker's own button too (it asks for a pointer cursor).
+    expect(
+      await page.getByLabel('A logo or photo').evaluate((el) => getComputedStyle(el, '::file-selector-button').cursor),
+    ).toBe('none');
     await page.getByRole('combobox', { name: /^Category/ }).click();
     await page.getByRole('option', { name: 'Food & drink' }).hover();
     await expect(glove).toHaveClass(/show/);

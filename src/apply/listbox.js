@@ -123,8 +123,12 @@ export function enhance(select) {
     box.setAttribute('aria-expanded', 'true');
     wrap.classList.add('lb-open');
     highlight(i < 0 ? 0 : i);
+    // Near the bottom of the screen the list opens below the fold: bring it into view.
+    list.scrollIntoView({ block: 'nearest' });
   };
   const close = () => {
+    // A new search starts each time the list closes.
+    typed = '';
     list.hidden = true;
     box.setAttribute('aria-expanded', 'false');
     box.removeAttribute('aria-activedescendant');

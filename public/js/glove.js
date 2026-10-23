@@ -3,8 +3,8 @@
 // over the page, points at links, buttons and drop-down options, holds a
 // crayon over text fields (its tip is the hotspot; the caret shows where text
 // goes) and squashes into a grab on click. It stays on everywhere a page can
-// draw: only the root scrollbars and other documents (iframes) get the native
-// cursor back. Only for fine pointers; touch and reduced motion keep the
+// draw: only scrollbars and other documents (iframes) get the native cursor
+// back, because no page cursor can cover them. Only for fine pointers; touch and reduced motion keep the
 // native cursor. Self-contained, so any page can add it with
 // <script src='/js/glove.js' defer></script>.
 (function () {
@@ -95,12 +95,21 @@
     return t instanceof Element ? t.closest(sel) : null;
   }
 
+  // So are the scrollbars of scrolling boxes in the page (a long list, a textarea).
+  /** @param {PointerEvent} e */
+  function onScrollbar(e) {
+    var t = e.target;
+    if (!(t instanceof Element) || t === document.documentElement || t === document.body) return false;
+    var r = t.getBoundingClientRect();
+    var x = e.clientX - r.left - t.clientLeft, y = e.clientY - r.top - t.clientTop;
+    return (t.scrollHeight > t.clientHeight && x > t.clientWidth) || (t.scrollWidth > t.clientWidth && y > t.clientHeight);
+  }
   /** @param {PointerEvent} e */
   function move(e) {
     if (e.pointerType === 'touch') { show(false); return; }
     // The root scrollbars belong to the browser: no page cursor can hide the arrow there.
     var de = document.documentElement;
-    if (e.clientX >= de.clientWidth || e.clientY >= de.clientHeight) { show(false); return; }
+    if (e.clientX >= de.clientWidth || e.clientY >= de.clientHeight || onScrollbar(e)) { show(false); return; }
     tx = e.clientX; ty = e.clientY;
     if (!shown) { x = tx; y = ty; tilt = 0; }
     show(true);

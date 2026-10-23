@@ -68,10 +68,10 @@ select { cursor: pointer; }
 .lb-open .lb-box::after { margin-top: -2px; transform: rotate(-135deg); }
 .lb-empty .lb-value { color: var(--ink-soft); }
 .lb-box[aria-invalid='true'] { border-color: var(--rose-ink); box-shadow: 3px 3px 0 var(--rose-ink); }
-.lb-list { position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 6px); max-height: 280px; margin: 0; padding: 6px; overflow-y: auto; list-style: none; background: var(--card); border: 3px solid var(--line); border-radius: 14px 10px 16px 9px; box-shadow: 5px 5px 0 var(--drop); }
+.lb-list { scrollbar-width: thin; scrollbar-color: var(--ink-soft) var(--paper); position: absolute; z-index: 20; left: 0; right: 0; top: calc(100% + 6px); max-height: 280px; margin: 0; padding: 6px; overflow-y: auto; list-style: none; background: var(--card); border: 3px solid var(--line); border-radius: 14px 10px 16px 9px; box-shadow: 5px 5px 0 var(--drop); }
 .lb-list [role='option'] { padding: 8px 12px; border-radius: 10px 7px 11px 6px; font: 400 19px/1.25 var(--font-body); cursor: pointer; }
 .lb-list [role='option'][aria-selected='true'] { background: var(--butter); }
-.lb-list [role='option'][aria-selected='true']::before { content: '✓ '; }
+.lb-list [role='option'][aria-selected='true']::before { content: '✓ '; content: '✓ ' / ''; }
 .lb-list .lb-active { background: var(--sky-wash); outline: 2px dashed var(--sky-ink); outline-offset: -2px; }
 .lb-list .lb-active[aria-selected='true'] { background: var(--butter); }
 .field [aria-invalid='true'], .bad .picks .pick span { border-color: var(--rose-ink); box-shadow: 3px 3px 0 var(--rose-ink); }
@@ -82,7 +82,7 @@ select { cursor: pointer; }
 .picks .pick input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .picks .pick span { display: inline-block; padding: 8px 15px; background: var(--card); border: 3px solid var(--line); border-radius: 999px 30px 999px 40px; font: 400 19px/1.2 var(--font-body); transition: transform .12s ease; }
 .picks .pick input:checked + span { background: var(--butter); box-shadow: 3px 3px 0 var(--drop); transform: rotate(-1.5deg); }
-.picks .pick input:checked + span::before { content: '✓ '; }
+.picks .pick input:checked + span::before { content: '✓ '; content: '✓ ' / ''; }
 .picks .pick input:focus-visible + span { outline: 4px dashed var(--sky-ink); outline-offset: 3px; }
 .field.consent > label.pick { display: flex; align-items: flex-start; gap: 12px; margin: 0; font: 400 19px/1.4 var(--font-body); }
 .consent .pick span { flex: 1; min-width: 0; }
