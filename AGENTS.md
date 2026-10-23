@@ -1,29 +1,39 @@
 # Play by the Sandbox
 
-Event site for Play by the Sandbox, a creative event at the Vancouver Art Gallery in January 2027. It is one hand-written static page (`public/index.html`, with its CSS animations and scripts inline), a 360° three.js hero scene bundled from `src/hero/` into `hero.js`, and a Vercel function, `api/og.js`, that renders the 1200x630 share card with `@vercel/og`.
+Event site for Play by the Sandbox, a creative event at the Vancouver Art Gallery in January 2027. It is one hand-written static page (`public/index.html`, with its CSS animations and scripts inline), a 360° three.js hero scene bundled from `src/hero/` into `hero.js`, and a Vercel function, `api/og.js`, that renders the 1200x630 share card with `@vercel/og`. Two application forms (`/apply/creator`, `/apply/brand`) store submissions in Neon Postgres, and the team reviews them at `/apply/review` (see "Application forms" below).
 
 The repo was imported on 2026-10-21 from Vercel production deployment `dpl_HRayQz8pD3L1Yn7Q7mJfhFaHU7Vq`. Before that the site was deployed with the Vercel CLI and had no git history.
 
 ## Layout
 
-| Path                        | What it is                                                                                                              |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `public/`                   | The site, served byte for byte. Don't reformat it: whitespace in `index.html` affects inline layout and the animations. |
-| `public/styles/tokens.css`  | The palette: every colour on the site as a CSS custom property. The /apply pages link it too.                           |
-| `public/js/glove.js`        | The cartoon glove cursor (fine pointers only). Self-contained: injects its own CSS.                                     |
-| `public/js/doodles.js`      | The doodle creatures, heading squiggles and Sandy the peeker. Self-contained: injects its own CSS.                      |
-| `api/og.js`                 | `GET /api/og`, the Open Graph image. Fetches Chewy and Gaegu from Google Fonts at request time.                         |
-| `src/hero/`                 | The hero's 3D premiere scene (`scene.js`), the crayon post-process (`crayon.js`) and the DOM/WebGL entry (`main.js`).   |
-| `scripts/build.mjs`         | Production build: copies `public/` to `dist/`, then bundles `src/hero/main.js` with esbuild into `dist/hero.js`.        |
-| `tools/make-poster.mjs`     | `npm run poster`: renders the still crayon frame into `public/hero-poster.jpg` and `public/hero-poster-m.jpg`.          |
-| `tools/make-icons.mjs`      | `npm run icons`: renders `public/logo.svg` (the "S" monogram) to the favicon, apple-touch and manifest PNGs.            |
-| `tools/flicker.mjs`         | `npm run flicker`: graphics QA. Measures frame-to-frame change across a whole camera turn, camera turning and held.     |
-| `tools/seams.mjs`           | `npm run seams`: checks the crayon paper for tiling seams at several pixel ratios (autocorrelation of flat paper).      |
-| `tools/perf.mjs`            | `npm run perf`: draw calls, triangles, main-thread time and frame rate, mobile and desktop, CPU throttled 4x.           |
-| `scripts/serve.mjs`         | Serves `dist/` and `api/og` locally, the way Vercel does. Used by the e2e suite.                                        |
-| `scripts/vercel-ignore.mjs` | Vercel's ignored build step. Git deployments build only for `main` and `staging`.                                       |
-| `tests/`                    | Vitest unit tests, with a coverage floor in `vitest.config.mjs`.                                                        |
-| `e2e/`                      | Playwright tests against the built site, on desktop and mobile Chrome.                                                  |
+| Path                        | What it is                                                                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `public/`                   | The site, served byte for byte. Don't reformat it: whitespace in `index.html` affects inline layout and the animations.                                    |
+| `public/styles/tokens.css`  | The palette: every colour on the site as a CSS custom property. The /apply pages link it too.                                                              |
+| `public/js/glove.js`        | The cartoon glove cursor (fine pointers only). Self-contained: injects its own CSS.                                                                        |
+| `public/js/doodles.js`      | The doodle creatures, heading squiggles and Sandy the peeker. Self-contained: injects its own CSS.                                                         |
+| `api/og.js`                 | `GET /api/og`, the Open Graph image. Fetches Chewy and Gaegu from Google Fonts at request time.                                                            |
+| `src/apply/forms.js`        | The two application forms, one config object each. The single place to add, remove or reword fields.                                                       |
+| `src/apply/`                | `validate.js` (shared by browser and server), `render.js` (the pages, at build time), `client.js` and `review-client.js` (browser).                        |
+| `api/apply.js`              | `POST /api/apply`: validates and stores an application and its optional photo.                                                                             |
+| `api/review.js`             | `GET`/`PATCH`/`DELETE /api/review`: the team's list, status changes and deletes. Needs the review secret.                                                  |
+| `api/review-photo.js`       | `GET /api/review-photo?id=`: an application's photo. Needs the review secret.                                                                              |
+| `api/_lib/`                 | Shared server code (not functions): the database pool and HTTP helpers.                                                                                    |
+| `migrations/`               | Versioned SQL, applied in name order by `scripts/migrate.mjs`.                                                                                             |
+| `public/apply/apply.css`    | Styles for the apply and review pages, with the palette as custom properties.                                                                              |
+| `src/hero/`                 | The hero's 3D premiere scene (`scene.js`), the crayon post-process (`crayon.js`) and the DOM/WebGL entry (`main.js`).                                      |
+| `scripts/build.mjs`         | Production build: copies `public/` to `dist/`, bundles `src/hero/main.js` into `dist/hero.js`, and renders and bundles the apply pages into `dist/apply/`. |
+| `scripts/migrate.mjs`       | `npm run migrate`: applies `migrations/` to `DATABASE_URL`. Vercel runs it before every build.                                                             |
+| `tools/make-poster.mjs`     | `npm run poster`: renders the still crayon frame into `public/hero-poster.jpg` and `public/hero-poster-m.jpg`.                                             |
+| `tools/make-icons.mjs`      | `npm run icons`: renders `public/logo.svg` (the "S" monogram) to the favicon, apple-touch and manifest PNGs.                                               |
+| `tools/flicker.mjs`         | `npm run flicker`: graphics QA. Measures frame-to-frame change across a whole camera turn, camera turning and held.                                        |
+| `tools/seams.mjs`           | `npm run seams`: checks the crayon paper for tiling seams at several pixel ratios (autocorrelation of flat paper).                                         |
+| `tools/perf.mjs`            | `npm run perf`: draw calls, triangles, main-thread time and frame rate, mobile and desktop, CPU throttled 4x.                                              |
+| `scripts/serve.mjs`         | Serves `dist/` and the `api/` functions locally, the way Vercel does. Without `DATABASE_URL` it uses an in-memory PGlite database. Used by the e2e suite.  |
+| `scripts/vercel-ignore.mjs` | Vercel's ignored build step. Git deployments build only for `main` and `staging`.                                                                          |
+| `tests/`                    | Vitest unit tests, with a coverage floor in `vitest.config.mjs`. The API tests run on PGlite.                                                              |
+| `tests-db/`                 | `npm run test:db`: the same API tests and migration checks against a real Postgres (`TEST_DATABASE_URL`, CI's Database job).                               |
+| `e2e/`                      | Playwright tests against the built site, on desktop and mobile Chrome.                                                                                     |
 
 ## Commands
 
@@ -34,7 +44,9 @@ npm run lint           # ESLint, zero warnings, plus html-validate on index.html
 npm run typecheck      # tsc --noEmit with checkJs
 npm test               # Vitest with coverage floor
 npm run build          # dist/
-npm run e2e            # Playwright; builds and serves on 127.0.0.1:4321
+npm run e2e            # Playwright; builds and serves on 127.0.0.1:4321 (E2E_PORT to change it)
+npm run migrate        # apply migrations/ to DATABASE_URL (does nothing without it)
+npm run test:db        # API and migration tests against TEST_DATABASE_URL, after npm run migrate
 npm run build && npm run serve   # local preview
 npm run poster         # re-render the hero posters after changing the scene or the crayon pass
 npm run icons          # re-render the PNG icons after changing public/logo.svg
@@ -93,8 +105,18 @@ The shortcuts can be turned off from the footer ("Turn off keyboard shortcuts", 
 - Vercel project `play-by-the-sandbox` (`prj_ejBMjqhQA8euAySrRdacoWEalmAY`), team `nathanpannells-projects` (`team_CJ0RWNsNJK6vDQy2raakV6cZ`). It's connected to this repo through the Vercel GitHub integration, and the production branch is `main`.
 - Production: `playbythesandbox.ca` and `www.playbythesandbox.ca`.
 - Staging: `staging.playbythesandbox.ca`, bound to git branch `staging`.
-- DNS is on Vercel, the registrar. There is no database and there are no environment variables.
+- DNS is on Vercel, the registrar.
+- Database: Neon project `play-by-the-sandbox` (`fragrant-salad-80023133`, aws-us-east-1 next to the functions' `iad1`, Postgres 17), database `sandbox`, role `sandbox_app`. Branch `production` (default) serves `main`, branch `staging` serves `staging`; the staging role has its own password. Computes are 0.25 CU with a 300 s suspend timeout. Nothing polls the database: queries happen only on `/api/apply` and the review endpoints, and idle pool connections close after 5 s.
+- Environment variables (Vercel, encrypted): `DATABASE_URL` and `REVIEW_SECRET`, each set for Production and for Preview on git branch `staging`. Optional: `APPLY_RATE_LIMIT` (applications per address per hour, default 8) and `APPLY_DAILY_CAP` (applications from everyone per day, default 1000).
 - The Vercel MCP connector has no grant for this team. Use the Vercel CLI, which is logged in as `nathanpannell`. For raw API calls, use `npx -y vercel@latest api <path>`, because the installed 50.1.3 CLI lacks `vercel api`.
+
+## Application forms
+
+- `/apply/creator` and `/apply/brand` are static pages rendered at build time from `src/apply/forms.js`. Like the home page, they link `/styles/tokens.css` (no colours of their own in `public/apply/apply.css`), carry inline copies of the `#crayonType` and `#crayonSoft` filters (`src/apply/render.js`), and load the glove cursor. To change a form, edit its config there: fields, labels, hints, options, limits and sections. Answers are stored as JSON keyed by field name, so field changes need no migration, but don't rename a field that already has submissions. The home page footer links to both forms.
+- The browser checks answers with the same `validate()` the server uses, shrinks photos over 1.5 MB to 1600 px JPEGs, and sends `multipart/form-data` to `/api/apply`. The server is the real check: lengths, emails, links (an @handle becomes the profile URL), options, the photo's type from its bytes (JPEG, PNG, WebP, GIF) and size (4 MB, under Vercel's 4.5 MB body limit), a `nickname` honeypot, a rate limit per address (IPv6 counted by its /64) and a daily cap for everyone. The count and the insert share one transaction under an advisory lock per address, so parallel requests can't slip past the limit. Addresses are stored only as an HMAC keyed with `REVIEW_SECRET`, so `/api/apply` stays closed (503) on a deployment without that secret.
+- Storage: table `applications` (one row per application, `status` new, shortlisted or declined) and `application_photos` (the image bytes, kept apart so listing never reads them). Photos are served only through `/api/review-photo` with the review secret, never publicly.
+- `/apply/review` (noindex, and disallowed in `robots.txt`) asks for the review password, which is the `REVIEW_SECRET` env var for that environment (read it in the Vercel project settings). It lists applications newest first with photo, links and answers, filters by kind and status, sets the status, and deletes (for spam and tests).
+- Migrations: add a new numbered file to `migrations/`; never edit one that has shipped. `npm run migrate` runs them in one transaction under an advisory lock. Vercel's build command runs it first, so a deploy migrates its own Neon branch, and a deploy without `DATABASE_URL` fails.
 
 ## Delivery
 
