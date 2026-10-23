@@ -9,6 +9,9 @@ The repo was imported on 2026-10-21 from Vercel production deployment `dpl_HRayQ
 | Path                        | What it is                                                                                                              |
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `public/`                   | The site, served byte for byte. Don't reformat it: whitespace in `index.html` affects inline layout and the animations. |
+| `public/styles/tokens.css`  | The palette: every colour on the site as a CSS custom property. The /apply pages link it too.                           |
+| `public/js/glove.js`        | The cartoon glove cursor (fine pointers only). Self-contained: injects its own CSS.                                     |
+| `public/js/doodles.js`      | The doodle creatures, heading squiggles and Sandy the peeker. Self-contained: injects its own CSS.                      |
 | `api/og.js`                 | `GET /api/og`, the Open Graph image. Fetches Chewy and Gaegu from Google Fonts at request time.                         |
 | `src/hero/`                 | The hero's 3D premiere scene (`scene.js`), the crayon post-process (`crayon.js`) and the DOM/WebGL entry (`main.js`).   |
 | `scripts/build.mjs`         | Production build: copies `public/` to `dist/`, then bundles `src/hero/main.js` with esbuild into `dist/hero.js`.        |
@@ -49,6 +52,16 @@ html-validate turns off three stylistic rules (`attr-quotes`, `doctype-style`, `
 - The logo is the crayon-stroke wordmark, `public/wordmark.svg` (the designer's file). It is inlined in `index.html` three times: the header link (on its own, `role="img"`, `aria-label="Sandbox"`), the hero card's title (hidden from screen readers, with a visually hidden "Sandbox" so the heading reads "Play by the Sandbox"), and the footer. The purple "o" is drawn as one stroked ring instead of the file's filled circle with a white hole, so it can draw in like the other letters and shows the paper through it.
 - All three share one filter, `#wmWobble`, in the page's hidden `<defs>`. Each letter draws in once (`.wm-s`, the `sbDraw` keyframes; the footer's waits until it scrolls into view). After that a small inline script, about 15 times a second, drifts the filter's noise (`#wmDrift`, an `feOffset`) and gives each letter a gentle sine wiggle. It only runs while a wordmark is on screen and the tab is visible. Under `prefers-reduced-motion` the wordmarks are drawn and still.
 - Tiny icons can't fit the whole word, so they use a monogram: the wordmark's red "S" on the brand's yellow disc with an ink ring (`public/logo.svg`, rendered to PNG by `npm run icons`). The share card (`api/og.js`) carries the wordmark as plain strokes (no filter) under the "Play by the" ribbon. Its URL is versioned (`/api/og?v=3`); bump the version when the card changes, so social caches refresh.
+
+## Palette and crayon type
+
+- The palette lives in `public/styles/tokens.css` and nowhere else: soft pastels (`--rose`, `--peach`, `--butter`, `--mint`, `--sky`, `--lilac`) for fills, `-wash` tints for big backgrounds, and `-ink` shades for coloured text, all on `--paper` with plum-charcoal `--ink` lines. `index.html` uses `var(--…)` everywhere except the wordmark's letter colours (the designer's file), the hero's dark backdrop and the `theme-color` meta. Text colours are AA on `--paper` and `--card`; on the pastel fills use `--ink` or `--ink-soft`. `e2e/crayon.spec.mjs` checks the contrast of every piece of text on the page.
+- All type is drawn in crayon with two SVG filters in the page's hidden `<defs>`: `#crayonType` for headings (`.toon`: wobbly edges and waxy grain, with a lighter pass of the same colour as its shadow) and `#crayonSoft` for reading text, `.hand`, chips and buttons (a light touch that stays easy to read). Focused controls drop the filter so the focus ring stays crisp. A page that wants the look needs both filters inline, because CSS can't reference a filter in another file.
+
+## Glove cursor and doodles
+
+- `glove.js` draws an old rubber-hose, four-finger white glove that follows the mouse with a slight lag and lean: an open hand over the page, pointing over links and buttons, a squashed grab while pressed. It only runs for `(pointer: fine)` without `prefers-reduced-motion`, hides for touch input and over text fields (the native cursor shows there), and never takes pointer events. Its frame loop stops as soon as the glove settles.
+- `doodles.js` gives each section a resident (crab, film-slate snail, gull, bouncy ball, rubber duck, mole in sunglasses) that turns up when it scrolls into view, draws a squiggle under each section heading, and, once the visitor is past the hero, has Sandy the sand critter peek in from an edge every 30 to 50 seconds (at most 8 times). IntersectionObservers drive the arrivals and run each creature's idle loop only while it is on screen; Sandy waits on timers, never a scroll handler. Everything is `aria-hidden` and `pointer-events: none`. Under reduced motion the creatures are drawn still and Sandy stays home. `/?doodle-debug` makes Sandy's first peek come right away.
 
 ## Hero layout
 

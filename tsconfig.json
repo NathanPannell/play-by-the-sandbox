@@ -11,5 +11,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["api", "scripts", "src", "tools", "tests", "e2e", "*.mjs"]
+  "include": ["api", "scripts", "src", "tools", "tests", "e2e", "public/js", "*.mjs"]
 }

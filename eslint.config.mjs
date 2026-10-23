@@ -9,6 +9,8 @@ export default [
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module', globals: { ...globals.node } },
     linterOptions: { reportUnusedDisableDirectives: 'error' },
   },
-  // Playwright evaluate() callbacks and the hero bundle run in the browser.
-  { files: ['e2e/**', 'tools/**', 'src/**'], languageOptions: { globals: { ...globals.browser } } },
+  // Playwright evaluate() callbacks, the hero bundle and the page scripts run in the browser.
+  { files: ['e2e/**', 'tools/**', 'src/**', 'public/**'], languageOptions: { globals: { ...globals.browser } } },
+  // The page scripts in public/js are classic scripts, not modules.
+  { files: ['public/**/*.js'], languageOptions: { sourceType: 'script' } },
 ];
