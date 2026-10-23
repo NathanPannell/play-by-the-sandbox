@@ -14,19 +14,35 @@ export function json(status, body) {
 const sha256 = (s) => createHash('sha256').update(s).digest();
 
 /**
- * The first client address Vercel saw, hashed with a server secret so the
- * database never holds raw IP addresses. Used only for rate limiting.
- * @param {Request} request
+ * The rate-limit bucket for an address: IPv4 as is, IPv6 by its /64 (one home
+ * connection usually gets a whole /64), IPv4-mapped IPv6 as the IPv4 address.
+ * @param {string} ip
  */
-export function ipHash(request) {
+export function addressBucket(ip) {
+  if (!ip.includes(':')) return ip;
+  if (ip.includes('.')) return ip.slice(ip.lastIndexOf(':') + 1);
+  const [head, tail] = ip.split('::');
+  const front = head ? head.split(':') : [];
+  const back = tail ? tail.split(':') : [];
+  const groups = [...front, ...Array(Math.max(0, 8 - front.length - back.length)).fill('0'), ...back];
+  return `${groups
+    .slice(0, 4)
+    .map((g) => (parseInt(g, 16) || 0).toString(16))
+    .join(':')}::/64`;
+}
+
+/**
+ * The first client address Vercel saw, bucketed and hashed with the review
+ * secret, so the database never holds raw IP addresses. Only for rate limiting.
+ * @param {Request} request
+ * @param {string} secret
+ */
+export function ipHash(request, secret) {
   const ip =
     (request.headers.get('x-forwarded-for') ?? '').split(',')[0].trim() ||
     request.headers.get('x-real-ip') ||
     'unknown';
-  return createHmac('sha256', process.env.REVIEW_SECRET ?? 'play-by-the-sandbox')
-    .update(ip)
-    .digest('hex')
-    .slice(0, 32);
+  return createHmac('sha256', secret).update(addressBucket(ip)).digest('hex').slice(0, 32);
 }
 
 /**

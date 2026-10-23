@@ -30,6 +30,34 @@ export function getDb() {
   return pool;
 }
 
+/**
+ * Runs fn inside one transaction on one connection: a pg Pool checks out a
+ * client, PGlite uses its own transaction(), anything else runs fn as is.
+ * @template T
+ * @param {Db} db
+ * @param {(tx: Db) => Promise<T>} fn
+ * @returns {Promise<T>}
+ */
+export async function transaction(db, fn) {
+  const any = /** @type {any} */ (db);
+  if (typeof any.connect === 'function') {
+    const client = await any.connect();
+    try {
+      await client.query('begin');
+      const result = await fn(client);
+      await client.query('commit');
+      return result;
+    } catch (err) {
+      await client.query('rollback').catch(() => {});
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+  if (typeof any.transaction === 'function') return any.transaction(fn);
+  return fn(db);
+}
+
 /** Closes the pool, if one was opened. */
 export async function closeDb() {
   const p = pool;

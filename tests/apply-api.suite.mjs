@@ -61,6 +61,7 @@ export function apiSuite(name, open) {
     });
     beforeEach(async () => {
       delete process.env.APPLY_RATE_LIMIT;
+      delete process.env.APPLY_DAILY_CAP;
       setDb(db);
       process.env.REVIEW_SECRET = SECRET;
       await db.query('delete from applications');
@@ -193,6 +194,40 @@ export function apiSuite(name, open) {
       expect((await bare({})).status).toBe(429);
       const rows = await db.query('select ip_hash from applications');
       expect(rows.rows.every((r) => /^[0-9a-f]{32}$/.test(r.ip_hash))).toBe(true);
+    });
+
+    it('holds the limit when one address sends many at once', async () => {
+      process.env.APPLY_RATE_LIMIT = '2';
+      const results = await Promise.all(Array.from({ length: 6 }, () => POST(applyRequest('brand', GOOD.brand))));
+      expect(results.map((r) => r.status).sort()).toEqual([200, 200, 429, 429, 429, 429]);
+      expect(await list()).toHaveLength(2);
+    });
+
+    it('counts an IPv6 /64 as one address', async () => {
+      process.env.APPLY_RATE_LIMIT = '2';
+      expect((await POST(applyRequest('brand', GOOD.brand, { ip: '2001:db8:1:2::1' }))).status).toBe(200);
+      expect((await POST(applyRequest('brand', GOOD.brand, { ip: '2001:db8:1:2:aaaa:bbbb:cccc:dddd' }))).status).toBe(
+        200,
+      );
+      expect((await POST(applyRequest('brand', GOOD.brand, { ip: '2001:0db8:0001:0002::ffff' }))).status).toBe(429);
+      expect((await POST(applyRequest('brand', GOOD.brand, { ip: '2001:db8:1:3::1' }))).status).toBe(200);
+    });
+
+    it('caps everyone’s applications per day', async () => {
+      process.env.APPLY_DAILY_CAP = '2';
+      expect((await POST(applyRequest('brand', GOOD.brand, { ip: '198.51.100.1' }))).status).toBe(200);
+      expect((await POST(applyRequest('brand', GOOD.brand, { ip: '198.51.100.2' }))).status).toBe(200);
+      const res = await body(await POST(applyRequest('brand', GOOD.brand, { ip: '198.51.100.3' })));
+      expect(res).toEqual({
+        status: 429,
+        json: { ok: false, message: 'We’ve had a flood of applications today. Please try again tomorrow.' },
+      });
+    });
+
+    it('stays closed without the review secret, which keys the address hashes', async () => {
+      delete process.env.REVIEW_SECRET;
+      expect((await POST(applyRequest('creator', GOOD.creator))).status).toBe(503);
+      expect((await db.query('select count(*)::int as n from applications')).rows[0].n).toBe(0);
     });
 
     it('says so when there is no database, or it fails', async () => {

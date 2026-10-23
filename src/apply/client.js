@@ -156,8 +156,8 @@ function answers() {
 function showErrors(errors) {
   let first = null;
   for (const f of config.fields) {
-    if (f.type === 'photo') continue;
-    setError(f.name, errors[f.name]);
+    // A photo's own error (set when it was picked) stays unless the server sends a new one.
+    if (f.type !== 'photo' || errors[f.name]) setError(f.name, errors[f.name]);
     if (errors[f.name] && !first) first = fieldEl(f.name);
   }
   if (first) {
