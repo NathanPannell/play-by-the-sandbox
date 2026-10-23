@@ -6,14 +6,12 @@
 import { PHOTO } from './forms.js';
 
 const SITE = 'https://playbythesandbox.ca';
-const FONTS =
-  'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&amp;family=Chewy&amp;family=Gaegu:wght@400;700&amp;display=swap';
+const FONTS = 'https://fonts.googleapis.com/css2?family=Gochi+Hand&amp;family=Patrick+Hand&amp;display=swap';
 
-// The home page's crayon filters (public/index.html): #crayonType draws the
-// headings, #crayonSoft the reading text. CSS can't reference a filter in
-// another file, so each page carries its own copy.
+// The glove cursor (/js/glove.js) draws itself through the home page's
+// #crayonSoft filter. CSS can't reference a filter in another file, so each
+// page carries its own copy. Text has no filter.
 const CRAYON_FILTERS = `<svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false"><defs>
-<filter id="crayonType" x="-6%" y="-20%" width="112%" height="145%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="2" seed="7" result="warp"/><feDisplacementMap in="SourceGraphic" in2="warp" scale="3.4" xChannelSelector="R" yChannelSelector="G" result="wob"/><feTurbulence type="fractalNoise" baseFrequency="0.8 0.24" numOctaves="3" seed="12" result="grain"/><feColorMatrix in="grain" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -2.6 2.2" result="mask"/><feComposite in="wob" in2="mask" operator="in"/></filter>
 <filter id="crayonSoft" x="-4%" y="-20%" width="108%" height="140%" color-interpolation-filters="sRGB"><feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="1" seed="5" result="warp"/><feDisplacementMap in="SourceGraphic" in2="warp" scale="1.3" xChannelSelector="R" yChannelSelector="G" result="wob"/><feTurbulence type="fractalNoise" baseFrequency="1.2 0.4" numOctaves="2" seed="21" result="grain"/><feColorMatrix in="grain" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.3 1.55" result="mask"/><feComposite in="wob" in2="mask" operator="in"/></filter>
 </defs></svg>`;
 

@@ -155,8 +155,40 @@ for (const path of ['/apply/creator', '/apply/brand', '/apply/review']) {
     await page.goto(path);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(overflow).toBeLessThanOrEqual(0);
-    // On the site's palette (/styles/tokens.css), with headings in crayon.
+    // On the site's palette (/styles/tokens.css), lettered by hand in solid ink: no texture on any text.
     expect(await page.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(255, 248, 239)');
-    expect(await page.locator('h1').evaluate((h) => getComputedStyle(h).filter)).toBe('url("#crayonType")');
+    expect(await page.locator('h1').evaluate((h) => getComputedStyle(h).fontFamily)).toContain('Gochi Hand');
+    expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toContain('Patrick Hand');
+    const textured = await page.evaluate(() =>
+      [...document.querySelectorAll('body *')]
+        .filter((el) => !el.closest('svg, .glove') && getComputedStyle(el).filter !== 'none')
+        .map((el) => el.tagName + '.' + el.className),
+    );
+    expect(textured).toEqual([]);
+  });
+}
+
+for (const path of ['/apply/creator', '/apply/brand']) {
+  test(`${path}: the consent tick sits beside its sentence, which wraps in a hanging indent`, async ({ page }) => {
+    await page.goto(path);
+    const label = page.locator('.consent label');
+    await label.scrollIntoViewIfNeeded();
+    const { box, lines, spacing } = await label.evaluate((el) => {
+      const input = /** @type {HTMLElement} */ (el.querySelector('input'));
+      const span = /** @type {HTMLElement} */ (el.querySelector('span'));
+      const range = document.createRange();
+      range.selectNodeContents(span);
+      return {
+        box: input.getBoundingClientRect().toJSON(),
+        lines: [...range.getClientRects()].map((r) => r.toJSON()),
+        spacing: getComputedStyle(span).letterSpacing,
+      };
+    });
+    expect(spacing).toBe('normal');
+    // The first line of text shares a row with the tick box…
+    expect(lines[0].top).toBeLessThan(box.bottom);
+    expect(lines[0].bottom).toBeGreaterThan(box.top);
+    // …and every line, wrapped ones included, starts right of it.
+    for (const line of lines) expect(line.left).toBeGreaterThanOrEqual(box.right);
   });
 }
