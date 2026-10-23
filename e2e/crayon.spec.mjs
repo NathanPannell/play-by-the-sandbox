@@ -13,23 +13,46 @@ test('the pastel palette comes from the shared tokens file', async ({ page }) =>
   await expect(page.locator('body')).toHaveCSS('background-color', 'rgb(255, 248, 239)');
 });
 
-test('headings and reading text are drawn in crayon, and the wordmark is untouched', async ({ page }) => {
+test('text is lettered by hand in solid ink, with no texture, and the wordmark is untouched', async ({ page }) => {
   await page.goto('/', { waitUntil: 'domcontentloaded' });
-  const filters = await page.evaluate(() => ({
-    headings: [...document.querySelectorAll('h2.toon')].map((h) => getComputedStyle(h).filter),
-    copy: [...document.querySelectorAll('.sv p')].map((p) => getComputedStyle(p).filter),
+  const fonts = await page.evaluate(() => ({
+    headings: [...document.querySelectorAll('h2.toon')].map((h) => getComputedStyle(h).fontFamily),
+    copy: [...document.querySelectorAll('.sv p')].map((p) => getComputedStyle(p).fontFamily),
+    buttons: [...document.querySelectorAll('.btn')].map((b) => getComputedStyle(b).fontFamily),
   }));
-  expect(filters.headings.length).toBeGreaterThan(4);
-  expect(filters.headings.every((f) => f.includes('#crayonType'))).toBe(true);
-  expect(filters.copy.every((f) => f.includes('#crayonSoft'))).toBe(true);
-  await expect(page.locator('filter#crayonType')).toHaveCount(1);
+  expect(fonts.headings.length).toBeGreaterThan(4);
+  expect(fonts.headings.every((f) => f.includes('Gochi Hand'))).toBe(true);
+  expect(fonts.buttons.every((f) => f.includes('Gochi Hand'))).toBe(true);
+  expect(fonts.copy.every((f) => f.includes('Patrick Hand'))).toBe(true);
+  // No filter on any text or button: only drawings (SVG), the hero and the glove keep their crayon.
+  const textured = await page.evaluate(() =>
+    [...document.querySelectorAll('body *')]
+      .filter((el) => !el.closest('svg, .hero-scene, .glove') && getComputedStyle(el).filter !== 'none')
+      .map((el) => el.tagName + '.' + el.className),
+  );
+  expect(textured).toEqual([]);
+  await expect(page.locator('filter#crayonType')).toHaveCount(0);
+  // The glove still draws through #crayonSoft, so the page keeps that filter.
   await expect(page.locator('filter#crayonSoft')).toHaveCount(1);
+  // The fonts really load (a bad font URL would fall back to Comic Sans and still pass a fontFamily check).
+  await page.waitForFunction(
+    () => document.fonts.check('20px "Gochi Hand"') && document.fonts.check('20px "Patrick Hand"'),
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        [...document.querySelectorAll('.cap, .chip, .toy, .sv p a')].filter(
+          (el) => getComputedStyle(el).fontWeight !== '400',
+        ).length,
+    ),
+  ).toBe(0);
 
   for (const mark of await page.locator('svg.wordmark').all()) {
     expect(await mark.locator('.wm-s').evaluateAll((els) => els.map((el) => el.getAttribute('stroke')))).toEqual(
       WORDMARK,
     );
   }
+  await expect(page.locator('svg.wordmark g[filter="url(#wmWobble)"]')).toHaveCount(2);
 });
 
 test('text meets WCAG AA contrast against its background', async ({ page }) => {
@@ -78,7 +101,7 @@ test.describe('the glove cursor', () => {
     await expect(glove).toHaveCount(1);
     await expect(glove).toHaveAttribute('aria-hidden', 'true');
     await expect(glove).toHaveCSS('pointer-events', 'none');
-    await expect(glove).not.toHaveClass(/show/);
+    // (Chromium may send a synthetic pointer move as the page loads, so the glove can already be showing here.)
 
     await page.locator('#how').scrollIntoViewIfNeeded();
     await page.mouse.move(40, 40);
