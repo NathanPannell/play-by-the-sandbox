@@ -451,6 +451,9 @@ describe('crayon pass', () => {
     expect(shader).toContain('max(length(dx), length(dy))');
     expect(shader).toMatch(/exp2\(floor\(level\)\)/);
     expect(shader).toContain('marksOn(wp.zy');
+    // A scale is drawn the same whether it's the finer or the coarser of the pair, so there's no seam where they swap.
+    expect(shader).toContain('marks(p / scale0,');
+    expect(shader).toContain('marks(p / (scale0 * 2.0),');
     // The strokes don't read the screen position any more; only the paper, wobble and bleed do.
     expect(shader).not.toMatch(/strokes\(css/);
   });

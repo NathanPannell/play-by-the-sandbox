@@ -185,12 +185,13 @@ test('graphics QA: the crayon strokes travel with the surfaces as the camera tur
     const grab = (cam) => {
       const gl = /** @type {HTMLCanvasElement} */ (hero.draw(14, cam));
       const c = document.createElement('canvas');
-      const W = gl.width >> 1,
+      // A band across the whole width, a quarter of the height (phones' canvases are narrow).
+      const W = gl.width,
         H = gl.height >> 2;
       c.width = W;
       c.height = H;
       const ctx = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d', { willReadFrequently: true }));
-      ctx.drawImage(gl, gl.width >> 2, (gl.height * 3) >> 3, W, H, 0, 0, W, H);
+      ctx.drawImage(gl, 0, (gl.height * 3) >> 3, W, H, 0, 0, W, H);
       const d = ctx.getImageData(0, 0, W, H).data;
       const L = new Float32Array(W * H);
       for (let i = 0; i < W * H; i++) L[i] = 0.3 * d[i * 4] + 0.59 * d[i * 4 + 1] + 0.11 * d[i * 4 + 2];
@@ -206,12 +207,13 @@ test('graphics QA: the crayon strokes travel with the surfaces as the camera tur
     };
     const a = grab(14);
     const b = grab(14.25);
+    const margin = Math.round(a.W * 0.15);
     /** @param {number} shift */
     const err = (shift) => {
       let e = 0;
       let n = 0;
       for (let y = 4; y < a.H - 4; y++)
-        for (let x = 48; x < a.W - 48; x++) {
+        for (let x = margin; x < a.W - margin; x++) {
           e += Math.abs(b.hp[y * a.W + x] - a.hp[y * a.W + x - shift]);
           n++;
         }
@@ -219,7 +221,7 @@ test('graphics QA: the crayon strokes travel with the surfaces as the camera tur
     };
     let shift = 0;
     let best = Infinity;
-    for (let s = -40; s <= 40; s++) {
+    for (let s = -margin + 2; s <= margin - 2; s++) {
       const e = err(s);
       if (e < best) [shift, best] = [s, e];
     }

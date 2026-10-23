@@ -153,7 +153,8 @@ vec2 marksOn(vec2 p, float diagonal, float scale0, float fade, float along, floa
   #endif
   vec2 m = vec2(0.0);
   if (w < 0.999) m += (1.0 - w) * marks(p / scale0, diagonal, along, follow, hatch);
-  if (w > 0.001) m += w * marks(p / (scale0 * 2.0) + 51.0, diagonal, along, follow, hatch);
+  // No offset between scales: a scale must look the same whether it is the finer or the coarser of the pair.
+  if (w > 0.001) m += w * marks(p / (scale0 * 2.0), diagonal, along, follow, hatch);
   return 0.5 + (m - 0.5) / sqrt((1.0 - w) * (1.0 - w) + w * w);
 }
 // A staircase with soft risers: posterised, but with no hard step to flip.
