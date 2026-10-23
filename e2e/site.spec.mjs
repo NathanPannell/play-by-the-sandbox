@@ -1,7 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-const FORM = 'https://docs.google.com/forms/d/e/1FAIpQLScog6xEbmoeSFbAxWkzlkKT9GZ2bfAtfq8gVGeI10vezy11ag/viewform';
-
 test('the page loads with its title, share card and no errors', async ({ page }) => {
   /** @type {string[]} */
   const errors = [];
@@ -33,13 +31,31 @@ test('the page loads with its title, share card and no errors', async ({ page })
   expect(errors).toEqual([]);
 });
 
-test('the apply button links to the sign-up form', async ({ page }) => {
+test('grab a toy offers brands and creators, each with its application form', async ({ page }) => {
   await page.goto('/');
+  const toys = page.locator('#toys .toy');
+  await expect(toys).toHaveText(['Brands', 'Creators']);
   const cta = page.locator('#roleCta');
   await cta.scrollIntoViewIfNeeded();
-  await expect(cta).toBeVisible();
-  await expect(cta).toHaveAttribute('href', FORM);
-  await expect(cta).toHaveAttribute('target', '_blank');
+
+  // Brands is picked to start with.
+  await expect(toys.nth(0)).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#roleTitle')).toHaveText('Brands');
+  await expect(cta).toHaveText('Apply as an upcoming brand →');
+  await expect(cta).toHaveAttribute('href', '/apply/brand');
+  await expect(cta).not.toHaveAttribute('target', /./);
+
+  await toys.nth(1).click();
+  await expect(toys.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(toys.nth(0)).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#roleTitle')).toHaveText('Creators');
+  await expect(cta).toHaveText('Apply as an upcoming creator →');
+  await expect(cta).toHaveAttribute('href', '/apply/creator');
+
+  await toys.nth(0).click();
+  await expect(cta).toHaveAttribute('href', '/apply/brand');
+  // Nothing on the page points at the old Google Form any more.
+  await expect(page.locator('a[href*="docs.google.com"]')).toHaveCount(0);
 });
 
 test('in-page navigation targets exist', async ({ page }) => {
