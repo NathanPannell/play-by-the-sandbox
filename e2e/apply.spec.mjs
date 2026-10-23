@@ -19,17 +19,13 @@ function watchErrors(page) {
 
 const unique = (/** @type {string} */ name) => `${name} ${test.info().project.name} ${Date.now()}`;
 
-test('the home page footer links to both forms', async ({ page }) => {
+test('the creator toy on the home page opens the creator form', async ({ page }) => {
   await page.goto('/');
-  const footer = page.locator('footer');
-  await expect(footer.getByRole('link', { name: 'Apply as an upcoming brand' })).toHaveAttribute(
-    'href',
-    '/apply/brand',
-  );
-  const creator = footer.getByRole('link', { name: 'Apply as an upcoming creator' });
-  await expect(creator).toHaveAttribute('href', '/apply/creator');
-  await creator.scrollIntoViewIfNeeded();
-  await creator.click();
+  await expect(page.locator('footer a[href^="/apply/"]')).toHaveCount(0);
+  const creators = page.locator('#toys .toy', { hasText: 'Creators' });
+  await creators.scrollIntoViewIfNeeded();
+  await creators.click();
+  await page.getByRole('link', { name: 'Apply as an upcoming creator' }).click();
   await expect(page).toHaveURL(/\/apply\/creator$/);
   await expect(page.locator('h1')).toHaveText('Apply as an upcoming creator');
 });
