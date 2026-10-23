@@ -3,6 +3,7 @@
 // The password is the REVIEW_SECRET env var. It's kept in sessionStorage for
 // this tab only and sent as a bearer token to /api/review.
 import { FORMS, STATUSES } from './forms.js';
+import { enhanceSelects } from './listbox.js';
 
 const KEY = 'sandbox-review-secret';
 const login = /** @type {HTMLFormElement} */ (document.getElementById('login'));
@@ -13,6 +14,8 @@ const list = /** @type {HTMLOListElement} */ (document.getElementById('list'));
 const summary = /** @type {HTMLElement} */ (document.getElementById('summary'));
 const filterKind = /** @type {HTMLSelectElement} */ (document.getElementById('filterKind'));
 const filterStatus = /** @type {HTMLSelectElement} */ (document.getElementById('filterStatus'));
+// Pastel drop-downs for the filters (listbox.js).
+enhanceSelects(board);
 
 /**
  * @typedef {{ id: string, kind: 'creator' | 'brand', name: string, email: string, status: string,

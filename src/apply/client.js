@@ -4,6 +4,7 @@
 // with the same validate() the server uses, sends the application and shows
 // the thank-you card.
 import { FORMS, PHOTO } from './forms.js';
+import { enhanceSelects } from './listbox.js';
 import { validate } from './validate.js';
 
 const formEl = /** @type {HTMLFormElement} */ (document.getElementById('applyForm'));
@@ -12,6 +13,9 @@ const formError = /** @type {HTMLElement} */ (document.getElementById('formError
 const submitBtn = /** @type {HTMLButtonElement} */ (formEl.querySelector('button[type="submit"]'));
 /** @type {Blob | null} */
 let photo = null;
+
+// Pastel drop-downs instead of the OS's select lists (listbox.js).
+enhanceSelects(formEl);
 
 /** @param {string} name */
 const fieldEl = (name) => /** @type {HTMLElement} */ (formEl.querySelector(`[data-field="${name}"]`));
@@ -38,6 +42,7 @@ for (const box of formEl.querySelectorAll('[data-max-rows]')) {
   const sync = () => (add.hidden = rows.children.length >= max);
   add.addEventListener('click', () => {
     rows.append(tpl.content.cloneNode(true));
+    enhanceSelects(rows);
     sync();
     /** @type {HTMLElement} */ (rows.lastElementChild?.querySelector('input'))?.focus();
   });
@@ -161,7 +166,8 @@ function showErrors(errors) {
     if (errors[f.name] && !first) first = fieldEl(f.name);
   }
   if (first) {
-    /** @type {HTMLElement} */ (first.querySelector('input, textarea, select'))?.focus();
+    // A drop-down's combobox comes before its hidden select, so it's the one focused.
+    /** @type {HTMLElement} */ (first.querySelector('input, textarea, [role="combobox"]'))?.focus();
     formError.textContent = 'A few things need fixing. They’re marked in red.';
     formError.hidden = false;
   }
