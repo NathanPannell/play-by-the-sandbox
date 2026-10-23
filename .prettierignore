@@ -1,0 +1,9 @@
+dist/
+coverage/
+test-results/
+playwright-report/
+package-lock.json
+# public/ is served byte for byte. index.html is hand-tuned, minified HTML whose
+# whitespace affects inline layout and the animations, so reformatting it would
+# change what visitors see. html-validate (npm run lint) and the e2e suite check it.
+public/
