@@ -50,6 +50,8 @@ describe('local server', () => {
     ['/site.webmanifest', 'application/manifest+json'],
     ['/hero.js', 'text/javascript; charset=utf-8'],
     ['/hero-poster.jpg', 'image/jpeg'],
+    ['/styles/tokens.css', 'text/css; charset=utf-8'],
+    ['/js/glove.js', 'text/javascript; charset=utf-8'],
   ])('serves %s as %s', async (path, type) => {
     const res = await get(path);
     expect(res.status).toBe(200);
