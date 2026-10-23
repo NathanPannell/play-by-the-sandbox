@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { measure } from '../tools/flicker.mjs';
+import { byBoil, measure } from '../tools/flicker.mjs';
 
 /** @param {import('@playwright/test').Page} page */
 const frames = (page) =>
@@ -146,19 +146,89 @@ test('without WebGL the crayon poster stands in for the scene', async ({ page })
 });
 
 test('graphics QA: holding the camera still, the crayon scene does not flicker', async ({ page }) => {
-  // The scene plays (crowd, flashes, marquee, confetti, the crayon boil) while
-  // the camera stays put, so any frame-to-frame popping is flicker, not motion.
+  // The scene plays (crowd, flashes, marquee, confetti) while the camera stays
+  // put, so any frame-to-frame popping is flicker, not motion. The one change
+  // allowed is the boil: the drawing steps to its next variant a few times a
+  // second (src/hero/crayon.js). Frames inside one step ("steady") must hold
+  // as still as ever, so anything per-frame or high-frequency still fails here.
   // tools/flicker.mjs measures the same thing across a whole revolution.
   test.setTimeout(90_000);
   await page.goto('/?hero-debug');
   await expect(page.locator('#heroScene')).toHaveClass(/ready/);
   await page.evaluate(() => document.fonts.ready);
   for (const start of [11.2, 30]) {
-    const times = Array.from({ length: 8 }, (_, i) => start + i / 30);
-    const { flicker, pops } = await measure(page, times, true);
-    expect(Math.max(...flicker), `flicker from t=${start}`).toBeLessThan(3);
-    expect(Math.max(...pops), `popping pixels from t=${start}`).toBeLessThan(2.5);
+    const times = Array.from({ length: 14 }, (_, i) => start + i / 30);
+    const { steady, boil } = byBoil(times, await measure(page, times, true));
+    expect(Math.max(...steady.flicker), `flicker from t=${start}`).toBeLessThan(3);
+    expect(Math.max(...steady.pops), `popping pixels from t=${start}`).toBeLessThan(2.5);
+    // The boil is a deliberate, low-rate step: most frames are steady, and a
+    // step changes the drawing visibly but by no more than a redraw.
+    expect(steady.flicker.length, `steady frames from t=${start}`).toBeGreaterThan(boil.flicker.length);
+    expect(boil.flicker.length, `boil steps from t=${start}`).toBeGreaterThan(0);
+    const mean = (/** @type {number[]} */ xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    expect(mean(boil.mad), `the boil shows from t=${start}`).toBeGreaterThan(3 * mean(steady.mad));
+    expect(Math.max(...boil.flicker), `boil size from t=${start}`).toBeLessThan(16);
+    expect(Math.max(...boil.pops), `boil popping from t=${start}`).toBeLessThan(10);
   }
+});
+
+test('graphics QA: the crayon strokes travel with the surfaces as the camera turns', async ({ page }) => {
+  // Draws one moment twice, the camera turned a little between. Fine marks
+  // that are fixed to the screen line up best with no shift; marks drawn on
+  // the surfaces line up best at the scene's own shift.
+  test.setTimeout(60_000);
+  await page.goto('/?hero-debug');
+  await expect(page.locator('#heroScene')).toHaveClass(/ready/);
+  const r = await page.evaluate(() => {
+    const hero = /** @type {any} */ (window).__hero;
+    /** @param {number} cam */
+    const grab = (cam) => {
+      const gl = /** @type {HTMLCanvasElement} */ (hero.draw(14, cam));
+      const c = document.createElement('canvas');
+      // A band across the whole width, a quarter of the height (phones' canvases are narrow).
+      const W = gl.width,
+        H = gl.height >> 2;
+      c.width = W;
+      c.height = H;
+      const ctx = /** @type {CanvasRenderingContext2D} */ (c.getContext('2d', { willReadFrequently: true }));
+      ctx.drawImage(gl, 0, (gl.height * 3) >> 3, W, H, 0, 0, W, H);
+      const d = ctx.getImageData(0, 0, W, H).data;
+      const L = new Float32Array(W * H);
+      for (let i = 0; i < W * H; i++) L[i] = 0.3 * d[i * 4] + 0.59 * d[i * 4 + 1] + 0.11 * d[i * 4 + 2];
+      // High-pass (luminance minus a 5x5 box blur): only the fine marks remain.
+      const hp = new Float32Array(W * H);
+      for (let y = 2; y < H - 2; y++)
+        for (let x = 2; x < W - 2; x++) {
+          let s = 0;
+          for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) s += L[(y + dy) * W + x + dx];
+          hp[y * W + x] = L[y * W + x] - s / 25;
+        }
+      return { hp, W, H };
+    };
+    const a = grab(14);
+    const b = grab(14.25);
+    const margin = Math.round(a.W * 0.15);
+    /** @param {number} shift */
+    const err = (shift) => {
+      let e = 0;
+      let n = 0;
+      for (let y = 4; y < a.H - 4; y++)
+        for (let x = margin; x < a.W - margin; x++) {
+          e += Math.abs(b.hp[y * a.W + x] - a.hp[y * a.W + x - shift]);
+          n++;
+        }
+      return e / n;
+    };
+    let shift = 0;
+    let best = Infinity;
+    for (let s = -margin + 2; s <= margin - 2; s++) {
+      const e = err(s);
+      if (e < best) [shift, best] = [s, e];
+    }
+    return { shift, best, still: err(0) };
+  });
+  expect(Math.abs(r.shift), 'the marks move with the scene').toBeGreaterThan(2);
+  expect(r.best, 'and line up there better than where they started').toBeLessThan(r.still * 0.92);
 });
 
 test('the camera turns all the way round, from the middle of the event', async ({ page }) => {

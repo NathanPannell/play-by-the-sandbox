@@ -1,6 +1,17 @@
-import { Color, DataTexture, InstancedMesh, Mesh, OneFactor, Texture, Vector3, ZeroFactor } from 'three';
+import {
+  Color,
+  DataTexture,
+  InstancedMesh,
+  Matrix4,
+  Mesh,
+  OneFactor,
+  PerspectiveCamera,
+  Texture,
+  Vector3,
+  ZeroFactor,
+} from 'three';
 import { describe, expect, it } from 'vitest';
-import { BOIL_SPEED, WOBBLE_PX, createCrayonPass } from '../src/hero/crayon.js';
+import { BOIL_FPS, BOIL_VARIANTS, VARIANTS, WOBBLE_PX, boilStep, createCrayonPass } from '../src/hero/crayon.js';
 import { bulbLayout } from '../src/hero/marquee.js';
 import {
   MAX_DPR,
@@ -387,18 +398,64 @@ describe('crayon pass', () => {
     expect(pass.material.uniforms.uPx.value).toBe(1.5);
   });
 
-  it('boils by drifting slowly, never by jumping', () => {
-    const boil = (/** @type {number} */ t) => {
-      pass.setBoil(t);
-      return pass.material.uniforms.uBoil.value;
-    };
-    // A frame apart, the drift moves a sliver of a noise cell.
-    for (const t of [0, 1.2, 37, 600]) expect(Math.abs(boil(t + 1 / 60) - boil(t))).toBeLessThan(0.01);
-    expect(boil(2) - boil(1)).toBeCloseTo(BOIL_SPEED, 6);
-    // Wrapped to stay precise, once every few hours.
-    expect(boil(4096 / BOIL_SPEED + 1)).toBeLessThan(1);
-    expect(pass.material.uniforms.uWobble.value).toBe(WOBBLE_PX);
+  it('boils like hand-drawn animation: a few drawings, stepped a few times a second', () => {
+    // A deliberate low-rate step (on threes to fives), never a per-frame reseed.
+    expect(BOIL_FPS).toBeGreaterThanOrEqual(3);
+    expect(BOIL_FPS).toBeLessThanOrEqual(8);
+    expect(VARIANTS).toHaveLength(BOIL_VARIANTS);
+    expect(BOIL_VARIANTS).toBeGreaterThanOrEqual(3);
+    // It holds for a whole step, then moves to the next drawing, and cycles.
+    const step = 1 / BOIL_FPS;
+    for (const t of [0, 1.2, 37, 600]) {
+      const at = Math.floor(t * BOIL_FPS) * step;
+      expect(boilStep(at + step * 0.1)).toBe(boilStep(at + step * 0.9));
+      expect(boilStep(at + step * 1.1)).toBe((boilStep(at + step * 0.5) + 1) % BOIL_VARIANTS);
+    }
+    expect(boilStep(BOIL_VARIANTS * step + step / 2)).toBe(boilStep(step / 2));
+    expect(boilStep(-step / 2)).toBe(BOIL_VARIANTS - 1);
+    // Each drawing is the same one nudged a little: strokes by under two of
+    // their units (CSS pixels), the outline wobble by under a noise cell.
+    for (const v of VARIANTS) {
+      expect(Math.hypot(...v.strokes)).toBeLessThan(2);
+      expect(Math.hypot(...v.wobble)).toBeLessThan(1);
+    }
+    const uniforms = pass.material.uniforms;
+    for (let i = 0; i < BOIL_VARIANTS; i++) {
+      pass.setBoil(i * step + step / 2);
+      expect(uniforms.uBoilStrokes.value.toArray()).toEqual(VARIANTS[i].strokes);
+      expect(uniforms.uBoilWobble.value.toArray()).toEqual(VARIANTS[i].wobble);
+    }
+    expect(uniforms.uWobble.value).toBe(WOBBLE_PX);
     expect(WOBBLE_PX).toBeLessThanOrEqual(2.5);
+  });
+
+  it('finds the surfaces from depth, so the strokes stay on them as the camera turns', () => {
+    const camera = new PerspectiveCamera(60, 16 / 9, 0.4, 260);
+    camera.position.set(3, 1.6, -2);
+    camera.rotation.set(0.1, 0.7, 0);
+    camera.updateMatrixWorld();
+    pass.setCamera(camera);
+    const uniforms = pass.material.uniforms;
+    // The inverse of projection x view: a point projected and brought back lands where it was.
+    const viewProj = new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    const p = new Vector3(4, 2, -12);
+    const back = p.clone().applyMatrix4(viewProj).applyMatrix4(uniforms.uInvViewProj.value);
+    expect(back.distanceTo(p)).toBeLessThan(1e-3);
+    expect(uniforms.uTanHalf.value).toBeCloseTo(Math.tan(Math.PI / 6), 6);
+    const shader = pass.material.fragmentShader;
+    expect(shader).toContain('vec3 worldAt(vec2 uv)');
+    // Triplanar on the surface's own normal, at two world-fixed scales cross-faded by distance.
+    expect(shader).toContain('vec3 dx = dFdx(wp);');
+    expect(shader).toContain('cross(dx, dy)');
+    // The scale follows the pixel's footprint on the surface, so grazing surfaces don't alias.
+    expect(shader).toContain('max(length(dx), length(dy))');
+    expect(shader).toMatch(/exp2\(floor\(level\)\)/);
+    expect(shader).toContain('marksOn(wp.zy');
+    // A scale is drawn the same whether it's the finer or the coarser of the pair, so there's no seam where they swap.
+    expect(shader).toContain('marks(p / scale0,');
+    expect(shader).toContain('marks(p / (scale0 * 2.0),');
+    // The strokes don't read the screen position any more; only the paper, wobble and bleed do.
+    expect(shader).not.toMatch(/strokes\(css/);
   });
 
   it('has a lighter variant for phones and software renderers', () => {

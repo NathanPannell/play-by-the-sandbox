@@ -108,6 +108,7 @@ function start(root) {
   /** @param {number} t @param {number} [cameraT] */
   function draw(t, cameraT = t) {
     world.update(t, cameraT);
+    crayon.setCamera(world.camera);
     crayon.setBoil(t);
     renderer.setRenderTarget(target);
     renderer.render(world.scene, world.camera);
