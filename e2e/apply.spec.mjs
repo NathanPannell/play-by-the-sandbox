@@ -165,6 +165,11 @@ for (const path of ['/apply/creator', '/apply/brand', '/apply/review']) {
         .map((el) => el.tagName + '.' + el.className),
     );
     expect(textured).toEqual([]);
+    await page.waitForFunction(
+      () => document.fonts.check('20px "Gochi Hand"') && document.fonts.check('20px "Patrick Hand"'),
+    );
+    // The glove cursor draws through #crayonSoft, so each page carries that filter.
+    await expect(page.locator('filter#crayonSoft')).toHaveCount(1);
   });
 }
 

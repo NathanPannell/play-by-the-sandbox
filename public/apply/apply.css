@@ -7,7 +7,9 @@
 }
 
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--paper); color: var(--ink); font: 400 19px/1.45 var(--font-body); }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 400 19px/1.45 var(--font-body); font-synthesis-weight: none; }
+/* One weight only: emphasis is a butter highlight, not a fake bold. */
+strong { font-weight: 400; padding: 0 4px; background: var(--butter); border-radius: 6px 4px 7px 3px; }
 a { color: var(--ink); }
 a:hover { color: var(--sky-ink); }
 [hidden] { display: none !important; }

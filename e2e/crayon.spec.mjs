@@ -32,6 +32,20 @@ test('text is lettered by hand in solid ink, with no texture, and the wordmark i
   );
   expect(textured).toEqual([]);
   await expect(page.locator('filter#crayonType')).toHaveCount(0);
+  // The glove still draws through #crayonSoft, so the page keeps that filter.
+  await expect(page.locator('filter#crayonSoft')).toHaveCount(1);
+  // The fonts really load (a bad font URL would fall back to Comic Sans and still pass a fontFamily check).
+  await page.waitForFunction(
+    () => document.fonts.check('20px "Gochi Hand"') && document.fonts.check('20px "Patrick Hand"'),
+  );
+  expect(
+    await page.evaluate(
+      () =>
+        [...document.querySelectorAll('.cap, .chip, .toy, .sv p a')].filter(
+          (el) => getComputedStyle(el).fontWeight !== '400',
+        ).length,
+    ),
+  ).toBe(0);
 
   for (const mark of await page.locator('svg.wordmark').all()) {
     expect(await mark.locator('.wm-s').evaluateAll((els) => els.map((el) => el.getAttribute('stroke')))).toEqual(
@@ -87,7 +101,7 @@ test.describe('the glove cursor', () => {
     await expect(glove).toHaveCount(1);
     await expect(glove).toHaveAttribute('aria-hidden', 'true');
     await expect(glove).toHaveCSS('pointer-events', 'none');
-    await expect(glove).not.toHaveClass(/show/);
+    // (Chromium may send a synthetic pointer move as the page loads, so the glove can already be showing here.)
 
     await page.locator('#how').scrollIntoViewIfNeeded();
     await page.mouse.move(40, 40);
