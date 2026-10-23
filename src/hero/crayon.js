@@ -7,18 +7,50 @@
 // depth, which is flat across any plane, so the ground doesn't sprout contour
 // lines).
 //
-// Nothing in it switches abruptly from one frame to the next, so it doesn't
-// flicker as the camera turns: the paper grain and stroke textures are fixed
-// to the screen, the posterised steps and the wax coverage are soft rather
-// than hard thresholds, and the "boil" is a slow, capped drift of the outline
-// wobble instead of a reseed.
-import { Color, Mesh, OrthographicCamera, PlaneGeometry, Scene, ShaderMaterial, Vector2 } from 'three';
+// The crayon marks are drawn on the surfaces, not on the screen. Each pixel's
+// world position comes back from the depth texture, and the hatching (and the
+// regions that vary its angle) is laid on the surface it lands on, projected
+// from the axis the surface faces most (triplanar). So as the camera turns,
+// strokes stay on the gallery, the screens and the props, instead of the
+// scene sliding behind a fixed sheet of texture. To keep strokes about the
+// same width on screen at any distance, each is drawn at two power-of-two
+// scales around the size of a CSS pixel there and cross-faded by distance:
+// both scales are fixed to the world, so nothing swims or pops. Only the
+// paper's tooth stays fixed to the screen, as paper would.
+//
+// Nothing changes abruptly from one frame to the next, so it doesn't flicker
+// as the camera turns: the posterised steps and the wax coverage are soft
+// rather than hard thresholds. The one deliberate jump is the "boil": like
+// hand-drawn animation, the strokes and the outline wobble step through
+// BOIL_VARIANTS slightly different drawings, BOIL_FPS times a second. A small
+// offset each, never a reseed, so it reads as the same drawing redrawn. Under
+// reduced motion the page draws one still frame, on one variant.
+import { Color, Matrix4, Mesh, OrthographicCamera, PlaneGeometry, Scene, ShaderMaterial, Vector2 } from 'three';
 import { INK, PAPER } from './palette.js';
 
-/** How fast the outline wobble drifts, in noise cells per second. */
-export const BOIL_SPEED = 0.35;
-/** The most the wobble moves a line, in CSS pixels. */
+/** How many times a second the drawing boils to its next variant. */
+export const BOIL_FPS = 5;
+/** How many slightly different drawings the boil cycles through. */
+export const BOIL_VARIANTS = 4;
+/** The most the outline wobble moves a line, in CSS pixels. */
 export const WOBBLE_PX = 2.2;
+/**
+ * Each variant's nudge: the strokes' offset (in their own units, about a CSS
+ * pixel, so mostly across the strokes) and the outline wobble's offset (in its
+ * noise cells).
+ */
+export const VARIANTS = [
+  { strokes: [0, 0], wobble: [0, 0] },
+  { strokes: [0.4, 1.25], wobble: [0.55, 0.3] },
+  { strokes: [0.9, 0.45], wobble: [0.2, 0.75] },
+  { strokes: [0.2, 1.7], wobble: [0.8, 0.5] },
+];
+
+/** Which variant the boil shows at a moment. @param {number} seconds */
+export function boilStep(seconds) {
+  const n = Math.floor(seconds * BOIL_FPS + 1e-6) % BOIL_VARIANTS;
+  return n < 0 ? n + BOIL_VARIANTS : n;
+}
 
 const vertexShader = /* glsl */ `
 varying vec2 vUv;
@@ -34,8 +66,11 @@ uniform sampler2D tColor;
 uniform sampler2D tDepth;
 uniform vec2 uRes;
 uniform float uPx;
-uniform float uBoil;
 uniform float uWobble;
+uniform mat4 uInvViewProj;
+uniform float uTanHalf;
+uniform vec2 uBoilStrokes;
+uniform vec2 uBoilWobble;
 uniform float uNear;
 uniform float uFar;
 uniform vec3 uPaper;
@@ -75,6 +110,12 @@ float invDepthAt(vec2 uv) {
   float z = texture2D(tDepth, uv).x;
   return (uFar - z * (uFar - uNear)) / (uNear * uFar);
 }
+// Where a pixel is in the world, from its depth.
+vec3 worldAt(vec2 uv) {
+  float z = texture2D(tDepth, uv).x;
+  vec4 p = uInvViewProj * vec4(uv * 2.0 - 1.0, z * 2.0 - 1.0, 1.0);
+  return p.xyz / p.w;
+}
 mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
 // The finest detail a pattern may have, in noise cells per CSS pixel: under
 // half a cell per device pixel. Finer value noise aliases against the pixel
@@ -84,9 +125,36 @@ float band(float cellsPerCss) { return min(cellsPerCss, 0.45 * uPx); }
 // Grain lives in a rotated, offset copy of the plane, so its lattice never
 // lines up with the pixel grid either.
 vec2 tilt(vec2 p, float a) { return rot(a) * p + vec2(37.1, 91.7) * a; }
-float strokes(vec2 css, float angle, float offset) {
-  vec2 r = rot(angle) * css;
-  return 0.62 * noise(vec2(r.x * 0.045, r.y * band(0.75)) + offset) + 0.38 * noise(vec2(r.x * 0.11, r.y * band(1.7)) + offset * 1.7);
+// Strokes in their own units: q is a point on a surface, in units of about a
+// CSS pixel there (one of the two scales, so between one and two CSS pixels):
+// the frequencies sit a little under the band limit.
+float strokes(vec2 q, float angle, float offset) {
+  vec2 r = rot(angle) * q + uBoilStrokes;
+  return 0.62 * noise(vec2(r.x * 0.03, r.y * 0.6 * band(0.75)) + offset) + 0.38 * noise(vec2(r.x * 0.07, r.y * 0.6 * band(1.7)) + offset * 1.7);
+}
+// The two crayon marks on one plane at one scale: the main strokes (following
+// the screen's luminance gradient where there is one, otherwise diagonal) and,
+// only where it shows, the cross-hatch for the darks.
+vec2 marks(vec2 q, float diagonal, float along, float follow, bool hatch) {
+  float s = strokes(q, diagonal, 0.0);
+  if (follow > 0.001) s = mix(s, strokes(q, along, 0.0), follow);
+  return vec2(s, hatch ? strokes(q, diagonal + 1.25, 3.0) : 0.5);
+}
+// Both scales on one plane, cross-faded, with the contrast the blend loses put back.
+// p is in world units (metres). Each plane has its own hatch angle: an angle
+// that varied across the surface would turn the strokes about the world's
+// origin, far away in stroke units, and swirl them into rings.
+vec2 marksOn(vec2 p, float diagonal, float scale0, float fade, float along, float follow, bool hatch) {
+  #ifdef LITE
+  // Phones: a shorter cross-fade, so most pixels draw only one scale.
+  float w = smoothstep(0.3, 0.7, fade);
+  #else
+  float w = fade;
+  #endif
+  vec2 m = vec2(0.0);
+  if (w < 0.999) m += (1.0 - w) * marks(p / scale0, diagonal, along, follow, hatch);
+  if (w > 0.001) m += w * marks(p / (scale0 * 2.0) + 51.0, diagonal, along, follow, hatch);
+  return 0.5 + (m - 0.5) / sqrt((1.0 - w) * (1.0 - w) + w * w);
 }
 // A staircase with soft risers: posterised, but with no hard step to flip.
 float softSteps(float x, float n) {
@@ -98,9 +166,8 @@ void main() {
   vec2 css = gl_FragCoord.xy / uPx;
   vec2 texel = 1.0 / uRes;
 
-  // A hand that never quite follows the line, drifting slowly.
-  vec2 drift = vec2(uBoil, uBoil * 0.7);
-  vec2 wob = vec2(noise(css * 0.03 + drift), noise(css * 0.03 - drift + 41.0)) - 0.5;
+  // A hand that never quite follows the line, a little different each time the drawing boils.
+  vec2 wob = vec2(noise(css * 0.03 + uBoilWobble), noise(css * 0.03 - uBoilWobble + 41.0)) - 0.5;
   vec2 uv = vUv + wob * 2.0 * uWobble * uPx * texel;
 
   // Colour, bleeding a little past its edges.
@@ -137,12 +204,46 @@ void main() {
   // The two patterns are blended, not the angle, so a moving edge doesn't
   // spin the strokes around it.
   vec2 g = vec2(luma(gxc), luma(gyc));
-  float gl = length(g);
-  float region = noise(css * 0.012 + 7.0);
-  float diagonal = 0.75 + (region - 0.5) * 0.9;
   float along = atan(g.y, g.x) + 1.5708;
-  float follow = smoothstep(0.12, 0.4, gl);
-  float s = mix(strokes(css, diagonal, 0.0), strokes(css, along, 0.0), follow);
+  float follow = smoothstep(0.12, 0.4, length(g));
+
+  // ...drawn on the surfaces. The surface's normal comes from how its world
+  // position changes across the screen; it picks the plane(s) to project on.
+  vec3 wp = worldAt(uv);
+  vec3 dx = dFdx(wp);
+  vec3 dy = dFdy(wp);
+  vec3 n = abs(normalize(cross(dx, dy) + 1e-9));
+  // How much surface a CSS pixel covers here, and the two scales around it.
+  // Head-on that's set by the distance; on surfaces seen at a grazing angle
+  // (the ground, the sides of things) a pixel spans far more along the view,
+  // so the scale follows the pixel's longer side to keep strokes from
+  // aliasing into moire rings. Clamped, because across a silhouette the
+  // derivatives jump between surfaces.
+  float headOn = uTanHalf * 2.0 * uPx / (uRes.y * dc);
+  float cssWorld = clamp(max(length(dx), length(dy)) * uPx, headOn, headOn * 8.0);
+  float level = log2(max(cssWorld, 1e-6));
+  float scale0 = exp2(floor(level));
+  float fade = level - floor(level);
+  // The cross-hatch only darkens below this lightness (see "Cross-hatch the darks").
+  bool hatch = Lq < 0.45;
+  vec2 m;
+  #ifdef LITE
+  // Phones: only the plane the surface faces most.
+  bool onX = n.x >= n.y && n.x >= n.z;
+  bool onY = !onX && n.y >= n.z;
+  vec2 plane = onX ? wp.zy : onY ? wp.xz + 17.0 : wp.xy + 31.0;
+  m = marksOn(plane, onX ? 0.75 : onY ? 0.45 : 1.05, scale0, fade, along, follow, hatch);
+  #else
+  vec3 w = n * n * n * n;
+  w /= w.x + w.y + w.z;
+  w *= step(0.02, w);
+  m = vec2(0.0);
+  if (w.x > 0.0) m += w.x * marksOn(wp.zy, 0.75, scale0, fade, along, follow, hatch);
+  if (w.y > 0.0) m += w.y * marksOn(wp.xz + 17.0, 0.45, scale0, fade, along, follow, hatch);
+  if (w.z > 0.0) m += w.z * marksOn(wp.xy + 31.0, 1.05, scale0, fade, along, follow, hatch);
+  m /= w.x + w.y + w.z;
+  #endif
+  float s = m.x;
 
   // Paper grain: crayon catches the tops of the tooth, misses the valleys.
   float grain = 0.55 * noise(tilt(css, 0.61) * band(0.75)) + 0.33 * noise(tilt(css, 1.13) * band(1.9) + 13.0) + 0.12 * noise(tilt(css, 2.29) * 0.2 + 5.0);
@@ -151,7 +252,7 @@ void main() {
   vec3 col = mix(uPaper, wax * (0.9 + 0.2 * s), cover);
 
   // Cross-hatch the darks.
-  float s2 = strokes(css, diagonal + 1.25, 3.0);
+  float s2 = m.y;
   float dark = smoothstep(0.45, 0.1, Lq) * smoothstep(0.45, 0.8, s2) * smoothstep(0.2, 0.7, grain + 0.3);
   col = mix(col, col * 0.62, dark);
 
@@ -184,7 +285,9 @@ void main() {
 
 /**
  * The full-screen crayon pass. Call `setSize` with the render target's size in
- * device pixels and the device pixel ratio, and `setBoil` with the clock.
+ * device pixels and the device pixel ratio, `setCamera` with the scene's
+ * camera before each frame (to find the surfaces from depth), and `setBoil`
+ * with the clock.
  * `lite` compiles a cheaper variant for phones and software renderers: one
  * halo ring and a four-neighbour depth edge, about a third fewer texture reads.
  * @param {{ color: import('three').Texture, depth: import('three').Texture, near: number, far: number, lite?: boolean }} input
@@ -201,8 +304,11 @@ export function createCrayonPass({ color, depth, near, far, lite = false }) {
       tDepth: { value: depth },
       uRes: { value: new Vector2(1, 1) },
       uPx: { value: 1 },
-      uBoil: { value: 0 },
       uWobble: { value: WOBBLE_PX },
+      uInvViewProj: { value: new Matrix4() },
+      uTanHalf: { value: Math.tan((28 * Math.PI) / 180) },
+      uBoilStrokes: { value: new Vector2() },
+      uBoilWobble: { value: new Vector2() },
       uNear: { value: near },
       uFar: { value: far },
       uPaper: { value: srgb(PAPER) },
@@ -225,11 +331,16 @@ export function createCrayonPass({ color, depth, near, far, lite = false }) {
       material.uniforms.uRes.value.set(width, height);
       material.uniforms.uPx.value = px;
     },
+    /** @param {import('three').PerspectiveCamera} camera */
+    setCamera(camera) {
+      material.uniforms.uInvViewProj.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
+      material.uniforms.uTanHalf.value = Math.tan((camera.fov * Math.PI) / 360);
+    },
     /** @param {number} seconds */
     setBoil(seconds) {
-      // Wrapped to stay well inside float precision. The wrap is a jump, but
-      // it comes round once every three hours.
-      material.uniforms.uBoil.value = (seconds * BOIL_SPEED) % 4096;
+      const v = VARIANTS[boilStep(seconds)];
+      material.uniforms.uBoilStrokes.value.fromArray(v.strokes);
+      material.uniforms.uBoilWobble.value.fromArray(v.wobble);
     },
     dispose() {
       quad.geometry.dispose();
