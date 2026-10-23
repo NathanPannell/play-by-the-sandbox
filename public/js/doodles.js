@@ -136,7 +136,7 @@
     // Narrower screens: smaller, and tucked up into the gap above the heading.
     '@media (max-width:1100px){.doodle{width:72px;height:72px}.doodle.tl,.doodle.tr{top:-22px}}' +
     '@media (max-width:600px){.doodle{width:56px;height:56px}.doodle.tl,.doodle.tr{top:-14px}.doodle.br{bottom:2px}.doodle.bl{bottom:40px}.peeker{width:72px;height:72px}}' +
-    '@media (prefers-reduced-motion: reduce){.doodle,.doodle *,.dd-line *{animation:none !important;opacity:1 !important;stroke-dashoffset:0 !important}}';
+    '@media (prefers-reduced-motion: reduce){.doodle,.doodle *,.dd-line *{animation:none !important;opacity:1 !important;stroke-dashoffset:0 !important}.peek-stage{display:none}}';
   var style = document.createElement('style');
   style.textContent = css;
   document.head.appendChild(style);
@@ -207,15 +207,22 @@
 
   /** @param {number} lo @param {number} hi */
   function rand(lo, hi) { return lo + Math.random() * (hi - lo); }
-  /** @param {number} ms */
-  function later(ms) {
+  var calm = window.matchMedia('(prefers-reduced-motion: reduce)');
+  function ready() { return !heroVisible && !document.hidden && !calm.matches && peeks < MAX_PEEKS; }
+  // Arm the next peek if none is pending: soon for the first, then every 30 to 50 seconds.
+  function next() {
+    if (timer || !ready()) return;
+    timer = window.setTimeout(peek, peeks ? rand(28000, 50000) : rand(first[0], first[1]));
+  }
+  // Duck back out of sight and drop whatever was pending.
+  function retract() {
     clearTimeout(timer);
-    timer = window.setTimeout(peek, ms);
+    timer = 0;
+    peeker.classList.remove('out');
   }
   function peek() {
-    // Hidden tab: try again later. Hero on screen: the hero observer restarts it.
-    if (document.hidden) { later(rand(6000, 10000)); return; }
-    if (heroVisible) { timer = 0; return; }
+    timer = 0;
+    if (!ready()) return;
     var sides = ['bottom', 'left', 'right'];
     var side = sides[Math.floor(Math.random() * sides.length)];
     peeker.dataset.side = side;
@@ -225,16 +232,25 @@
     peeker.classList.add('out');
     peeks++;
     timer = window.setTimeout(function () {
-      peeker.classList.remove('out');
-      if (peeks < MAX_PEEKS) later(rand(28000, 50000));
+      retract();
+      next();
     }, 4200);
   }
+  // The hero, a hidden tab or reduced motion send Sandy home; coming back re-arms it.
+  /** @param {boolean} away */
+  function settle(away) {
+    if (away) retract();
+    else next();
+  }
+  document.addEventListener('visibilitychange', function () { settle(document.hidden); });
+  if (calm.addEventListener) calm.addEventListener('change', function () { settle(calm.matches); });
+  else calm.addListener(function () { settle(calm.matches); });
   if (hero) {
     new IntersectionObserver(function (es) {
       heroVisible = es[es.length - 1].isIntersecting;
-      if (!heroVisible && !timer && peeks < MAX_PEEKS) later(rand(first[0], first[1]));
+      settle(heroVisible);
     }).observe(hero);
   } else {
-    later(rand(first[0], first[1]));
+    next();
   }
 })();

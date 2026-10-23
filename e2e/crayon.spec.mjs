@@ -150,6 +150,15 @@ test('Sandy peeks in from an edge once the hero is out of view', async ({ page }
   await expect(peeker).not.toHaveClass(/out/, { timeout: 8000 });
 });
 
+test('Sandy ducks out of sight when the hero scrolls back into view', async ({ page }) => {
+  await page.goto('/?doodle-debug', { waitUntil: 'domcontentloaded' });
+  const peeker = page.locator('.peeker');
+  await page.locator('#map').scrollIntoViewIfNeeded();
+  await expect(peeker).toHaveClass(/out/, { timeout: 5000 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(peeker).not.toHaveClass(/out/, { timeout: 1000 });
+});
+
 test('creatures are drawn and still for reduced motion, and Sandy stays home', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.goto('/?doodle-debug', { waitUntil: 'domcontentloaded' });

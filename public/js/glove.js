@@ -116,6 +116,8 @@
     document.addEventListener('pointerover', hover, { passive: true });
     document.addEventListener('pointerdown', down, { passive: true });
     document.addEventListener('pointerup', up, { passive: true });
+    // A native drag ends in pointercancel, not pointerup.
+    document.addEventListener('pointercancel', up, { passive: true });
     document.addEventListener('mouseout', leave, { passive: true });
     window.addEventListener('blur', away);
   }
@@ -128,6 +130,7 @@
     document.removeEventListener('pointerover', hover);
     document.removeEventListener('pointerdown', down);
     document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', up);
     document.removeEventListener('mouseout', leave);
     window.removeEventListener('blur', away);
     el.remove();
