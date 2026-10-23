@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /apply/review
 
 Sitemap: https://playbythesandbox.ca/sitemap.xml

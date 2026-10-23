@@ -14,9 +14,6 @@ concurrency:
   # PR runs supersede each other; every staging/main push keeps its own run.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Database: not applicable. The site has no database, so there are no migrations
-# to run against a throwaway Postgres.
-
 jobs:
   format:
     name: Format
@@ -80,9 +77,10 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      # Same install and build commands Vercel runs (vercel.json).
+      # Same install and build commands Vercel runs (vercel.json). Without
+      # DATABASE_URL, the migrate step has nothing to do here.
       - run: npm ci --omit=dev
-      - run: npm run build
+      - run: npm run migrate && npm run build
       - uses: actions/upload-artifact@v4
         with:
           name: dist
@@ -112,6 +110,37 @@ jobs:
             playwright-report/
             test-results/
           retention-days: 7
+
+  database:
+    name: Database
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # A throwaway Postgres, never Neon.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U ci" --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+      TEST_DATABASE_URL: postgres://ci:ci@localhost:5432/ci
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      # Every migration on an empty database, then again to prove a rerun is a no-op.
+      - run: npm run migrate
+      - run: npm run migrate
+      # The apply and review endpoints against real Postgres.
+      - run: npm run test:db
 
   security:
     name: Security

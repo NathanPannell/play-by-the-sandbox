@@ -8,11 +8,12 @@ export default defineConfig({
       provider: 'v8',
       include: ['api/**', 'scripts/**', 'src/**'],
       // The hero's DOM and WebGL entry point needs a real browser with a GPU;
-      // the Playwright suite covers it (e2e/hero.spec.mjs).
-      exclude: ['src/hero/main.js'],
+      // the Playwright suite covers it (e2e/hero.spec.mjs). The apply pages'
+      // browser scripts are covered by e2e/apply.spec.mjs.
+      exclude: ['src/hero/main.js', 'src/apply/client.js', 'src/apply/review-client.js'],
       reporter: ['text', 'json-summary'],
       // Floor set at the level reached when CI was added. Raise it, never lower it.
-      thresholds: { lines: 98, functions: 100, branches: 92, statements: 98 },
+      thresholds: { lines: 98, functions: 100, branches: 94, statements: 98 },
     },
   },
 });
