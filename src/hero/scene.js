@@ -1582,31 +1582,104 @@ function crowdBody(low) {
   return mergeGeometries(parts);
 }
 
-/** The eyes, the same on everyone: small solid dots, a little taller than wide, with no outline. */
+/** The eyes, mouths and the lines of closed eyes, on everyone. */
 const EYE_INK = INK;
 
 /**
- * A crowd member's head on its neck: the instance colour is the skin; the eyes
- * are baked in, the hair is its own mesh. The neck reaches down into the
- * shoulders, so no gap opens under it. The outline hull (userData.hull) is the
- * head and neck only: an ink ring round each little eye made them stare.
- * @param {boolean} low the lite tiers' version
+ * Where everything sits on a face, as fractions of the head's radius from its
+ * centre, the same on every head: a baby face, with round eyes set low and
+ * wide, rosy cheeks under them and an upturned smile below.
  */
-function crowdHead(low) {
+const FACE = {
+  eye: { x: 0.4, y: -0.12, r: 0.13 },
+  cheek: { x: 0.6, y: -0.38, r: 0.17 },
+  smile: { y: -0.5, half: 0.25, bend: 0.13 },
+  /** Happy faces: eyes closed in arcs (^ ^) and a wider smile. */
+  happyEye: { half: 0.16, bend: -0.1 },
+  happySmile: { half: 0.3, bend: 0.17 },
+  line: 0.045,
+};
+
+/**
+ * A matrix that sits a feature on a round head (radius `r`, centre `cy` up):
+ * at (fx, fy) on its face, facing out along the surface, `lift` times the
+ * radius from the centre.
+ * @param {number} r @param {number} cy @param {number} fx @param {number} fy @param {number} lift
+ * @param {[number, number, number]} scale
+ */
+function onFace(r, cy, fx, fy, lift, scale) {
+  const out = new Vector3(fx, fy, Math.sqrt(1 - fx * fx - fy * fy));
+  return new Matrix4()
+    .lookAt(out, new Vector3(), new Vector3(0, 1, 0))
+    .scale(new Vector3(...scale))
+    .setPosition(out.multiplyScalar(r * lift).add(new Vector3(0, cy, 0)));
+}
+
+/**
+ * An ink line lying on a round head: an arc through (fx, fy) `half` to each
+ * side, its ends `bend` higher (a smile) or lower (a closed eye), all as
+ * fractions of the radius.
+ * @param {number} r @param {number} cy @param {number} fx @param {number} fy
+ * @param {number} half @param {number} bend @param {number} segments
+ */
+function faceLine(r, cy, fx, fy, half, bend, segments) {
+  const width = FACE.line * r;
+  const points = [-1, -0.5, 0, 0.5, 1].map((u) => {
+    const x = fx + u * half;
+    const y = fy + bend * u * u;
+    return new Vector3(x, y, Math.sqrt(1 - x * x - y * y)).multiplyScalar(r + width * 0.4).add(new Vector3(0, cy, 0));
+  });
+  return new TubeGeometry(new CatmullRomCurve3(points), segments, width, 3, false);
+}
+
+/**
+ * The features of one face on a round head, with their colours: eyes (open
+ * dots, or closed arcs when `happy`), cheeks and a smile. None of them go in
+ * the outline hull: an ink ring round a little eye makes it stare.
+ * @param {number} r @param {number} cy @param {boolean} happy
+ * @param {0 | 1 | 2} detail how round: 0 for the lite crowd, 1 for the full crowd, 2 for the few influencers
+ * @returns {[BufferGeometry, Matrix4 | null, string][]}
+ */
+function faceParts(r, cy, happy, detail) {
+  /** A smooth dot with as many sides as the detail allows. @param {number} radius @param {number} [rings] */
+  const dot = (radius, rings = 4) => new SphereGeometry(radius, detail === 2 ? 10 : 6, detail === 2 ? 7 : rings);
+  /** @type {[BufferGeometry, Matrix4 | null, string][]} */
+  const parts = [];
+  const { eye, cheek } = FACE;
+  for (const sx of [-1, 1]) {
+    if (happy)
+      parts.push([faceLine(r, cy, sx * eye.x, eye.y, FACE.happyEye.half, FACE.happyEye.bend, 4), null, EYE_INK]);
+    else parts.push([dot(eye.r * r), onFace(r, cy, sx * eye.x, eye.y, 0.985, [1, 1.25, 0.5]), EYE_INK]);
+    parts.push([
+      dot(cheek.r * r, detail === 0 ? 3 : 4),
+      onFace(r, cy, sx * cheek.x, cheek.y, 0.99, [1, 0.6, 0.3]),
+      ROSE,
+    ]);
+  }
+  const smile = happy ? FACE.happySmile : FACE.smile;
+  parts.push([faceLine(r, cy, 0, FACE.smile.y, smile.half, smile.bend, detail === 0 ? 5 : 6), null, EYE_INK]);
+  return parts;
+}
+
+/**
+ * A crowd member's head on its neck: the instance colour is the skin; the face
+ * is baked in (its colours multiplied by the skin), the hair is its own mesh.
+ * The neck reaches down into the shoulders, so no gap opens under it. The
+ * outline hull (userData.hull) is the head and neck only.
+ * @param {boolean} low the lite tiers' version
+ * @param {boolean} happy eyes closed in happy arcs
+ */
+function crowdHead(low, happy) {
   const solid = [
     tinted(new CylinderGeometry(0.06, 0.07, 0.18, 5, 1, true), '#FFFFFF', place(0, 0.02, 0)),
     low
       ? tinted(new IcosahedronGeometry(0.2, 1), '#FFFFFF', place(0, 0.29, 0))
       : tinted(new SphereGeometry(0.2, 10, 7), '#FFFFFF', place(0, 0.29, 0)),
   ];
-  const eyes = [-1, 1].map((sx) =>
-    tinted(
-      new SphereGeometry(0.019, low ? 5 : 6, low ? 3 : 4),
-      EYE_INK,
-      placeScaled(sx * 0.068, 0.285, 0.182, [1, 1.3, 0.6]),
-    ),
+  const face = faceParts(0.2, 0.29, happy, low ? 0 : 1).map(([g, matrix, color]) =>
+    tinted(g, color, matrix ?? undefined),
   );
-  const geometry = mergeGeometries([...solid, ...eyes]);
+  const geometry = mergeGeometries([...solid, ...face]);
   const outline = mergeGeometries(solid.map((g) => g.clone().deleteAttribute('color').deleteAttribute('normal')));
   geometry.userData.hull = hullGeometry(outline);
   outline.dispose();
@@ -1789,8 +1862,16 @@ function crowd(count, paparazzi, random, low = false) {
   const n = folks.length;
   const material = toon({ vertexColors: true });
   const body = new InstancedMesh(crowdBody(low), material, n);
-  const head = new InstancedMesh(crowdHead(low), material, n);
-  head.userData.hull = head.geometry.userData.hull;
+  // About three in ten have their eyes closed in happy arcs: their own head mesh.
+  const smiling = folks.map((_, i) => hash1(i * 3.7 + 11) < 0.3);
+  const openFaced = folks.filter((_, i) => !smiling[i]);
+  const happyFaced = folks.filter((_, i) => smiling[i]);
+  const head = new InstancedMesh(crowdHead(low, false), material, Math.max(1, openFaced.length));
+  const happyHead = new InstancedMesh(crowdHead(low, true), material, Math.max(1, happyFaced.length));
+  for (const m of [head, happyHead]) m.userData.hull = m.geometry.userData.hull;
+  /** Each person's head mesh and their slot in it. */
+  const heads = folks.map((_, i) => (smiling[i] ? happyHead : head));
+  const headSlot = folks.map((f, i) => (smiling[i] ? happyFaced : openFaced).indexOf(f));
   const shortHaired = folks.filter((f) => f.hair !== 1);
   const longHaired = folks.filter((f) => f.hair === 1);
   const hairShort = new InstancedMesh(crowdHair(low, false), material, Math.max(1, shortHaired.length));
@@ -1808,9 +1889,10 @@ function crowd(count, paparazzi, random, low = false) {
     toon({ vertexColors: true }),
     Math.max(1, paparazzi),
   );
-  for (const m of [body, head, arms, cameras, hairShort, hairLong]) m.userData.outline = true;
+  for (const m of [body, head, happyHead, arms, cameras, hairShort, hairLong]) m.userData.outline = true;
   body.name = 'crowd-bodies';
   head.name = 'crowd-heads';
+  happyHead.name = 'crowd-heads-happy';
   arms.name = 'crowd-arms';
   phones.name = 'crowd-phones';
   cameras.name = 'crowd-cameras';
@@ -1820,16 +1902,18 @@ function crowd(count, paparazzi, random, low = false) {
   folks.forEach((f, i) => {
     const top = f.camera ? DUSK : (random() < 0.5 ? MIDS : BRIGHTS)[Math.floor(random() * 6)];
     body.setColorAt(i, new Color(top));
-    head.setColorAt(i, skin[i % skin.length]);
+    heads[i].setColorAt(headSlot[i], skin[i % skin.length]);
     arms.setColorAt(i * 2, skin[i % skin.length]);
     arms.setColorAt(i * 2 + 1, skin[i % skin.length]);
     (f.hair === 1 ? hairLong : hairShort).setColorAt(hairSlot[i], new Color(f.hairColor));
   });
   hairShort.count = shortHaired.length;
   hairLong.count = longHaired.length;
-  [body, head, hairShort, hairLong, arms, phones, cameras].forEach((m) => {
+  head.count = openFaced.length;
+  happyHead.count = happyFaced.length;
+  [body, head, happyHead, hairShort, hairLong, arms, phones, cameras].forEach((m) => {
     m.instanceMatrix.setUsage(DynamicDrawUsage);
-    if (m !== hairLong || longHaired.length) group.add(m);
+    if ((m !== hairLong || longHaired.length) && (m !== happyHead || happyFaced.length)) group.add(m);
   });
 
   /** Where phones and cameras flash, as live positions. Cameras fire more. */
@@ -1894,7 +1978,7 @@ function crowd(count, paparazzi, random, low = false) {
       s.set(f.h, f.h, f.h);
       built.set(f.w, f.h, f.w);
       body.setMatrixAt(i, m.compose(p.set(f.x, hop, f.z), q, built));
-      head.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.47 * f.h, f.z), q, s));
+      heads[i].setMatrixAt(headSlot[i], m.compose(p.set(f.x, hop + 1.47 * f.h, f.z), q, s));
       // Short hair can be a fuller, wider cut.
       puff.copy(s);
       if (f.hair === 2) puff.x = puff.z = s.x * 1.12;
@@ -1929,7 +2013,7 @@ function crowd(count, paparazzi, random, low = false) {
     });
     phones.count = k;
     cameras.count = c;
-    [body, head, hairShort, hairLong, arms, phones, cameras].forEach(
+    [body, head, happyHead, hairShort, hairLong, arms, phones, cameras].forEach(
       (mesh) => (mesh.instanceMatrix.needsUpdate = true),
     );
     return slot + n;
@@ -1941,10 +2025,10 @@ function crowd(count, paparazzi, random, low = false) {
  * One influencer, built in a Batch with their feet at the origin, facing +z:
  * shoes, legs (or a skirt), a top with a collar and a belt, arms with hands
  * (one on the hip, one up holding a phone or a selfie stick), a neck, a round
- * head with eyes, cheeks, a nose and a smile, and hair (a bob, a ponytail or
- * a bun). Returns where the phone is, for the flashes, and the hand holding it.
+ * head with a smiling face (open eyes, or closed happy ones), and hair (a bob,
+ * a ponytail or a bun). Returns where the phone is, for the flashes, and the hand holding it.
  * @param {Batch} b
- * @param {{ outfit: string, hair: string, skin: string, case: string, stick: boolean, skirt: boolean, style: number }} look
+ * @param {{ outfit: string, hair: string, skin: string, case: string, stick: boolean, skirt: boolean, style: number, happy?: boolean }} look
  */
 function figure(b, look) {
   const { outfit, hair, skin } = look;
@@ -1964,21 +2048,15 @@ function figure(b, look) {
   b.add(new CylinderGeometry(0.275, 0.275, 0.07, 14), look.skirt ? BUTTER_MID : PLUM, place(0, 0.92, 0));
   b.add(new TorusGeometry(0.1, 0.035, 6, 12), STONE_TRIM, place(0, 1.6, 0, 0, Math.PI / 2));
   b.cylinder(0.065, 0.075, 0.16, 10, skin, 0, 1.66, 0);
-  // Head and face. The eyes are small solid dots like the crowd's, with no
-  // outline: an ink ring round them made them stare.
+  // Head and face: the same baby face as the crowd's (FACE), on a bigger head.
   const hy = 1.92;
   b.ball(0.24, skin, 0, hy, 0, [1, 1.02, 1], 12);
-  for (const sx of [-1, 1]) {
-    b.add(new SphereGeometry(0.024, 8, 6), EYE_INK, placeScaled(sx * 0.082, hy - 0.005, 0.222, [1, 1.3, 0.6]), false);
-    b.ball(0.045, ROSE, sx * 0.14, hy - 0.06, 0.18, [1, 0.6, 0.4], 8);
-  }
-  b.ball(0.035, skin, 0, hy - 0.03, 0.235, [1, 0.9, 1], 8);
-  b.add(new TorusGeometry(0.055, 0.012, 4, 10, Math.PI), INK, place(0, hy - 0.08, 0.215, 0, 0, Math.PI), false);
+  for (const [g, matrix, color] of faceParts(0.24, hy, look.happy ?? false, 2)) b.add(g, color, matrix, false);
   // Hair.
   b.add(
     new SphereGeometry(0.255, 14, 6, 0, Math.PI * 2, 0, Math.PI * 0.55),
     hair,
-    placeScaled(0, hy + 0.02, -0.025, [1, 1, 1], 0, -0.3),
+    placeScaled(0, hy + 0.02, 0, [1, 1, 1], 0, -0.3),
   );
   b.ball(0.16, hair, 0, hy + 0.17, 0.12, [1.25, 0.45, 0.7], 10);
   if (look.style === 1) b.ball(0.12, hair, 0, hy - 0.05, -0.26, [0.8, 1.6, 0.8], 10);
@@ -2030,11 +2108,11 @@ function influencers(random, still) {
   const group = new Group();
   const looks = [
     { x: -0.7, z: 6.5, outfit: BUTTER, hair: INK, stick: true, skirt: false, style: 0 },
-    { x: 0.9, z: 7.4, outfit: LILAC_MID, hair: PEACH_MID, stick: false, skirt: true, style: 1 },
+    { x: 0.9, z: 7.4, outfit: LILAC_MID, hair: PEACH_MID, stick: false, skirt: true, style: 1, happy: true },
     { x: -0.4, z: 3.9, outfit: PAPER, hair: COCOA, stick: true, skirt: false, style: 2 },
     { x: 0.6, z: 18.6, outfit: MINT_MID, hair: ROSE_DEEP, stick: false, skirt: true, style: 0 },
     { x: -0.7, z: 19.6, outfit: ROSE, hair: COCOA, stick: true, skirt: false, style: 1 },
-    { x: 9.5, z: 8.5, outfit: SKY_MID, hair: BUTTER_MID, stick: true, skirt: true, style: 2 },
+    { x: 9.5, z: 8.5, outfit: SKY_MID, hair: BUTTER_MID, stick: true, skirt: true, style: 2, happy: true },
     { x: 14, z: 14.5, outfit: PEACH, hair: INK, stick: false, skirt: false, style: 0 },
     { x: -9, z: 9, outfit: ROSE_MID, hair: '#F1D2B6', stick: true, skirt: true, style: 1 },
     { x: -9.5, z: 18.5, outfit: PAPER, hair: LILAC_DEEP, stick: false, skirt: false, style: 2 },
