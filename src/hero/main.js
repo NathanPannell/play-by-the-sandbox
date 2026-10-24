@@ -1,20 +1,12 @@
-// Mounts the hero scene into #heroScene: renders the 3D scene into a target,
-// redraws it with the crayon pass, and keeps the loop cheap. It pauses when the
+// Mounts the hero scene into #heroScene: renders the 3D scene, coloured in
+// crayon on its own materials (crayon.js), straight to the canvas, and keeps
+// the loop cheap. It pauses when the
 // tab is hidden or the hero is scrolled away, draws one still frame for
 // prefers-reduced-motion, and leaves the poster image in place when WebGL is
 // unavailable. The root's data-state says which: poster (not started yet),
 // running, paused, static or fallback.
-import {
-  CanvasTexture,
-  DataTexture,
-  DepthTexture,
-  LinearFilter,
-  SRGBColorSpace,
-  UnsignedIntType,
-  WebGLRenderTarget,
-  WebGLRenderer,
-} from 'three';
-import { createCrayonPass } from './crayon.js';
+import { CanvasTexture, SRGBColorSpace, WebGLRenderer } from 'three';
+import { createCrayon } from './crayon.js';
 import { BLUE, INK, PAPER, RED, YELLOW } from './palette.js';
 import { adaptScale, isSoftwareRenderer, pickQuality } from './quality.js';
 import { STILL_T, buildScene } from './scene.js';
@@ -30,29 +22,28 @@ function start(root) {
   /** @param {string} state */
   const setState = (state) => (root.dataset.state = state);
 
-  if (!supportsWebGL2()) return setState('fallback');
-  /** @type {WebGLRenderer} */
-  let renderer;
-  try {
-    renderer = new WebGLRenderer({ antialias: false });
-  } catch {
-    return setState('fallback');
-  }
+  const gpu = probeGPU();
+  if (gpu === null) return setState('fallback');
 
   const params = new URLSearchParams(window.location.search);
   const qa = params.has('hero-debug');
   // QA only: ?hero-debug&hero-tier=full|lite|software forces a quality tier.
   const tier = qa ? params.get('hero-tier') : null;
-  const gl = renderer.getContext();
-  const info = gl.getExtension('WEBGL_debug_renderer_info');
   const quality = pickQuality({
     width: tier === 'full' ? 1440 : tier === 'lite' ? 390 : window.innerWidth,
     devicePixelRatio: window.devicePixelRatio,
     coarsePointer: tier === 'full' ? false : window.matchMedia('(pointer: coarse)').matches,
-    software: tier
-      ? tier === 'software'
-      : isSoftwareRenderer(String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))),
+    software: tier ? tier === 'software' : isSoftwareRenderer(gpu),
   });
+  /** @type {WebGLRenderer} */
+  let renderer;
+  try {
+    // Straight to the canvas, so the canvas's own multisampling smooths the
+    // thin things (ropes, poles, confetti, outlines) as the camera turns.
+    renderer = new WebGLRenderer({ antialias: quality.msaa > 0 });
+  } catch {
+    return setState('fallback');
+  }
   const canvas = renderer.domElement;
   canvas.className = 'hero-canvas';
   canvas.setAttribute('aria-hidden', 'true');
@@ -88,31 +79,19 @@ function start(root) {
     if (frames && !lost && mode !== 'running') draw(mode === 'static' ? STILL_T : t);
   });
   const world = buildScene(quality, { adTexture: ads });
-  // Multisampled, so thin things (ropes, poles, confetti, outlines) don't
-  // crawl as the camera turns; linear, because the crayon pass samples
-  // between pixels.
-  const target = new WebGLRenderTarget(1, 1, {
-    depthTexture: new DepthTexture(1, 1, UnsignedIntType),
-    samples: quality.msaa,
-    minFilter: LinearFilter,
-    magFilter: LinearFilter,
-  });
-  const crayon = createCrayonPass({
-    color: target.texture,
-    depth: /** @type {DepthTexture} */ (target.depthTexture),
-    near: world.camera.near,
-    far: world.camera.far,
+  // Crayon on the models: strokes in each material, ink outlines on the solids.
+  const crayon = createCrayon({
     lite: quality.lite,
+    strokes: quality.strokes,
+    anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()),
   });
+  crayon.apply(world.scene);
 
   /** @param {number} t @param {number} [cameraT] */
   function draw(t, cameraT = t) {
     world.update(t, cameraT);
     crayon.setBoil(t);
-    renderer.setRenderTarget(target);
     renderer.render(world.scene, world.camera);
-    renderer.setRenderTarget(null);
-    renderer.render(crayon.scene, crayon.camera);
     canvas.dataset.frames = String(++frames);
     root.classList.add('ready');
     placeCallout();
@@ -160,7 +139,6 @@ function start(root) {
     sized = key;
     renderer.setSize(w, h, false);
     const px = renderer.getPixelRatio();
-    target.setSize(Math.round(w * px), Math.round(h * px));
     crayon.setSize(Math.round(w * px), Math.round(h * px), px);
     world.setAspect(w / h);
     const aspect = w / h;
@@ -307,42 +285,27 @@ function start(root) {
         return canvas;
       },
       world,
-      /**
-       * Runs the crayon pass alone over a flat colour (flat depth, no glow),
-       * so the paper, grain and strokes can be checked for seams without any
-       * scene in the way.
-       * @param {number[]} rgb 0-255, sRGB
-       */
-      paper(rgb) {
-        this.draw(t);
-        const [r, g, b] = rgb.map((c) => Math.round(255 * (c / 255) ** 2.2));
-        const flat = new DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
-        const far = new DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
-        flat.needsUpdate = far.needsUpdate = true;
-        const uniforms = crayon.material.uniforms;
-        const [color, depth] = [uniforms.tColor.value, uniforms.tDepth.value];
-        uniforms.tColor.value = flat;
-        uniforms.tDepth.value = far;
-        renderer.setRenderTarget(null);
-        renderer.render(crayon.scene, crayon.camera);
-        uniforms.tColor.value = color;
-        uniforms.tDepth.value = depth;
-        flat.dispose();
-        far.dispose();
-        return canvas;
-      },
+      crayon,
     };
   }
 }
 
-function supportsWebGL2() {
+/**
+ * Whether WebGL2 works, and which GPU draws it: the unmasked renderer string,
+ * or null without WebGL2. A throwaway context, so the real renderer can be
+ * made with the right antialiasing for that GPU's quality tier.
+ */
+function probeGPU() {
   try {
     const gl = document.createElement('canvas').getContext('webgl2');
+    if (!gl) return null;
+    const info = gl.getExtension('WEBGL_debug_renderer_info');
+    const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
     // Hand the probe's context slot straight back.
-    gl?.getExtension('WEBGL_lose_context')?.loseContext();
-    return !!gl;
+    gl.getExtension('WEBGL_lose_context')?.loseContext();
+    return name;
   } catch {
-    return false;
+    return null;
   }
 }
 

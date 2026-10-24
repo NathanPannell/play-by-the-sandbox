@@ -1,33 +1,38 @@
 {
   "name": "play-by-the-sandbox",
   "private": true,
+  "type": "module",
   "engines": {
     "node": "24.x"
   },
   "scripts": {
     "build": "node scripts/build.mjs",
+    "migrate": "node scripts/migrate.mjs",
     "serve": "node scripts/serve.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint . --max-warnings=0 && html-validate public/index.html",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
+    "test:db": "vitest run --config vitest.db.config.mjs",
     "e2e": "playwright test",
     "poster": "node tools/make-poster.mjs",
     "flicker": "node tools/flicker.mjs",
     "icons": "node tools/make-icons.mjs",
-    "seams": "node tools/seams.mjs",
     "perf": "node tools/perf.mjs"
   },
   "dependencies": {
     "@vercel/og": "0.6.8",
     "esbuild": "0.28.2",
+    "pg": "8.23.1",
     "three": "0.186.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.64.1",
     "@types/node": "^24.19.2",
+    "@types/pg": "^8.23.1",
     "@types/three": "0.186.0",
     "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.13.0",

@@ -19,6 +19,7 @@ export const SOFTWARE_SCALE = 0.6;
  *   searchlights: number,
  *   frameSkip: number,
  *   msaa: number,
+ *   strokes: boolean,
  * }} Quality
  */
 
@@ -30,10 +31,11 @@ export function pickQuality({ width, devicePixelRatio, coarsePointer = false, so
   const mobile = width < 760 || (coarsePointer && width < 1100);
   const dpr = Math.min(Math.max(devicePixelRatio || 1, 1), mobile ? MOBILE_DPR : MAX_DPR);
   const lite = { crowd: 100, confetti: 110, searchlights: 3 };
-  if (software) return { mobile, lite: true, ...lite, dpr: SOFTWARE_SCALE, frameSkip: 2, msaa: 0 };
+  // Software renderers draw every pixel on the CPU: cel shading and outlines, but no crayon strokes.
+  if (software) return { mobile, lite: true, ...lite, dpr: SOFTWARE_SCALE, frameSkip: 2, msaa: 0, strokes: false };
   return mobile
-    ? { mobile, lite: true, ...lite, dpr, frameSkip: 1, msaa: 2 }
-    : { mobile, lite: false, dpr, crowd: 260, confetti: 300, searchlights: 6, frameSkip: 0, msaa: 4 };
+    ? { mobile, lite: true, ...lite, dpr, frameSkip: 1, msaa: 2, strokes: true }
+    : { mobile, lite: false, dpr, crowd: 260, confetti: 300, searchlights: 6, frameSkip: 0, msaa: 4, strokes: true };
 }
 
 /**

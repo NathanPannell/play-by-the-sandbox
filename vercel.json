@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "installCommand": "npm ci --omit=dev",
-  "buildCommand": "npm run build",
+  "buildCommand": "npm run migrate && npm run build",
   "outputDirectory": "dist",
-  "ignoreCommand": "node scripts/vercel-ignore.mjs"
+  "ignoreCommand": "node scripts/vercel-ignore.mjs",
+  "git": { "deploymentEnabled": { "**": false, "main": true, "staging": true } }
 }

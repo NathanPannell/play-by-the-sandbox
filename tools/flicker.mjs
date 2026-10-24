@@ -16,10 +16,17 @@
 // flicker: mean |F[t] - (F[t-1] + F[t+1]) / 2| per pixel. Smooth motion mostly
 //          cancels; pops, strobing and shimmer don't.
 // pops:    share of pixels whose second difference exceeds 48.
+//
+// The crayon drawing "boils" on purpose: it steps to a slightly different
+// drawing BOIL_FPS times a second (src/hero/crayon.js). So the frames are told
+// apart: "steady" ones, all three inside one boil step, must not flicker at
+// all; "boil" ones straddle a step and may change by the boil's own amount.
+// Anything per-frame or high-frequency shows up in the steady frames.
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { build } from '../scripts/build.mjs';
 import { startServer } from '../scripts/serve.mjs';
+import { boilStep } from '../src/hero/crayon.js';
 
 const PORT = 4393;
 export const DEVICES = {
@@ -76,10 +83,37 @@ export function measure(page, times, held = false) {
   }, /** @type {[number[], boolean]} */ ([times, held]));
 }
 
+/**
+ * Splits measure()'s per-frame metrics into steady frames (all inside one boil
+ * step) and boil frames (across a step).
+ * @param {number[]} times the times passed to measure()
+ * @param {{ mad: number[], flicker: number[], pops: number[] }} m
+ */
+export function byBoil(times, m) {
+  const steps = times.map(boilStep);
+  const steady = {
+    mad: /** @type {number[]} */ ([]),
+    flicker: /** @type {number[]} */ ([]),
+    pops: /** @type {number[]} */ ([]),
+  };
+  const boil = {
+    mad: /** @type {number[]} */ ([]),
+    flicker: /** @type {number[]} */ ([]),
+    pops: /** @type {number[]} */ ([]),
+  };
+  m.mad.forEach((v, i) => (steps[i] === steps[i + 1] ? steady : boil).mad.push(v));
+  m.flicker.forEach((v, i) => {
+    const group = steps[i] === steps[i + 1] && steps[i + 1] === steps[i + 2] ? steady : boil;
+    group.flicker.push(v);
+    group.pops.push(m.pops[i]);
+  });
+  return { steady, boil };
+}
+
 /** @param {number[]} xs */
-const mean = (xs) => xs.reduce((s, x) => s + x, 0) / xs.length;
+const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0);
 /** @param {number[]} xs */
-const max = (xs) => Math.max(...xs);
+const max = (xs) => (xs.length ? Math.max(...xs) : 0);
 
 /**
  * Runs of `frames` frames at 30 fps, `runs` of them spread over `period` seconds.
@@ -111,26 +145,32 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(500);
       for (const held of [false, true]) {
-        const all = {
+        const empty = () => ({
           mad: /** @type {number[]} */ ([]),
           flicker: /** @type {number[]} */ ([]),
           pops: /** @type {number[]} */ ([]),
-        };
+        });
+        const all = { steady: empty(), boil: empty() };
         for (const [i, times] of schedule().entries()) {
-          const m = await measure(page, times, held);
-          all.mad.push(...m.mad);
-          all.flicker.push(...m.flicker);
-          all.pops.push(...m.pops);
+          const parts = byBoil(times, await measure(page, times, held));
+          for (const k of /** @type {const} */ (['steady', 'boil'])) {
+            all[k].mad.push(...parts[k].mad);
+            all[k].flicker.push(...parts[k].flicker);
+            all[k].pops.push(...parts[k].pops);
+          }
           if (saveDir && !held) {
             await page.evaluate((t) => /** @type {any} */ (window).__hero.draw(t), times[times.length >> 1]);
             await page.locator('#heroScene canvas').screenshot({ path: `${saveDir}/${name}-${i}.png` });
           }
         }
-        console.log(
-          `${name.padEnd(8)} ${held ? 'held   ' : 'turning'} mad ${mean(all.mad).toFixed(2)} (max ${max(all.mad).toFixed(2)})  ` +
-            `flicker ${mean(all.flicker).toFixed(2)} (max ${max(all.flicker).toFixed(2)})  ` +
-            `pops ${mean(all.pops).toFixed(2)}% (max ${max(all.pops).toFixed(2)}%)`,
-        );
+        for (const k of /** @type {const} */ (['steady', 'boil'])) {
+          const a = all[k];
+          console.log(
+            `${name.padEnd(8)} ${held ? 'held   ' : 'turning'} ${k.padEnd(6)} mad ${mean(a.mad).toFixed(2)} (max ${max(a.mad).toFixed(2)})  ` +
+              `flicker ${mean(a.flicker).toFixed(2)} (max ${max(a.flicker).toFixed(2)})  ` +
+              `pops ${mean(a.pops).toFixed(2)}% (max ${max(a.pops).toFixed(2)}%)`,
+          );
+        }
       }
       await context.close();
     }

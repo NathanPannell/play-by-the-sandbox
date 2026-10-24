@@ -1,0 +1,62 @@
+/*
+ * Play by the Sandbox palette: soft pastels drawn with plum-charcoal crayon.
+ * The one source of truth for colour. index.html and the /apply pages link it
+ * and use var(--…) everywhere instead of hex values.
+ *
+ * Text contrast (WCAG 2.x), measured on --paper and --card:
+ *   --ink 11.5:1, --ink-soft 6.5:1, every --*-ink 5.2:1 or better.
+ *   On the pastel fills (--rose … --peach) use --ink or --ink-soft for text;
+ *   the --*-ink colours are only AA there for large text (3:1).
+ * Pastels and washes are fills and backgrounds, never text.
+ *
+ * Type is hand-lettered with solid fills: no crayon texture on text or buttons.
+ * Load both families from Google Fonts with display=swap.
+ */
+:root {
+  /* Paper and crayon ink */
+  --paper: #fff8ef;
+  --card: #fffdf9;
+  --ink: #3a3342;
+  --ink-soft: #5f5768;
+  --line: var(--ink);
+  --drop: rgba(58, 51, 66, 0.16); /* offset "shadow" under cards and chips */
+
+  /* Pastel fills */
+  --rose: #f6bbc6;
+  --rose-deep: #eb9cad; /* a second, deeper rose for shading */
+  --peach: #f9cea8;
+  --butter: #f7e3a0;
+  --mint: #bfe3cb;
+  --sky: #bad5f3;
+  --lilac: #d5c7f0;
+
+  /* Washes: big, quiet backgrounds */
+  --rose-wash: #fdecef;
+  --peach-wash: #fef0e2;
+  --butter-wash: #fef6dc;
+  --mint-wash: #e9f6ee;
+  --sky-wash: #e9f1fc;
+  --lilac-wash: #f2edfb;
+  --rule: #e9e1ee; /* grid and notebook lines */
+
+  /* Crayon inks: headings, accents and coloured text */
+  --rose-ink: #ad4660;
+  --peach-ink: #a1551f;
+  --butter-ink: #806413;
+  --mint-ink: #367449;
+  --sky-ink: #36619a;
+  --lilac-ink: #6e50a8;
+
+  /* Doodle extras */
+  --skin-1: #f8dac6;
+  --skin-2: #e3b597;
+  --skin-3: #c8967a;
+  --cocoa: #7d5d4c;
+  --sand: #f1dcb4;
+  --dusk: #4e4767; /* the night-time panel; --card text on it is 8.5:1 */
+
+  /* Type: Gochi Hand (marker lettering) for headings, buttons and chips;
+     Patrick Hand (neat handwriting) for reading text, labels and fields. Both have one weight. */
+  --font-display: 'Gochi Hand', 'Comic Sans MS', cursive;
+  --font-body: 'Patrick Hand', 'Comic Sans MS', system-ui, sans-serif;
+}
