@@ -34,7 +34,16 @@ import {
   pickQuality,
   rng,
 } from '../src/hero/quality.js';
-import { Batch, EYE, MARQUEE_YELLOW, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
+import {
+  Batch,
+  CROWD_HAND,
+  EYE,
+  MARQUEE_YELLOW,
+  REVOLUTION,
+  STILL_T,
+  buildScene,
+  glowMaterial,
+} from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
 const phone = pickQuality({ width: 390, devicePixelRatio: 3, coarsePointer: true });
@@ -459,6 +468,109 @@ describe('scene', () => {
           expect(at.y).toBeGreaterThan(0.8);
         }
       }
+    }
+  });
+
+  it('keeps every phone and camera in the crowd in a hand, however they move', () => {
+    for (const quality of [desktop, phone]) {
+      const world = buildScene(quality);
+      const bodies = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-bodies'));
+      const arms = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-arms'));
+      const phones = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-phones'));
+      const cameras = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-cameras'));
+      expect(arms.count).toBe(bodies.count * 2);
+      const m = new Matrix4();
+      for (const t of [0, 0.7, 1.9, STILL_T, 40.3]) {
+        world.update(t);
+        const hands = Array.from({ length: arms.count }, (_, i) =>
+          CROWD_HAND.clone().applyMatrix4(arms.getMatrixAt(i, m)),
+        );
+        /** @param {InstancedMesh} mesh @param {number} i */
+        const centre = (mesh, i) => new Vector3().setFromMatrixPosition(mesh.getMatrixAt(i, m));
+        /** How many hands are within `r` of a point. @param {Vector3} at @param {number} r */
+        const near = (at, r) => hands.filter((h) => h.distanceTo(at) < r).length;
+        expect(phones.count).toBeGreaterThan(5);
+        // A phone (0.28 tall) stands in one hand, which closes round its lower end.
+        for (let i = 0; i < phones.count; i++) expect(near(centre(phones, i), 0.1)).toBeGreaterThanOrEqual(1);
+        // A camera (0.34 wide) is gripped by both hands at its sides.
+        expect(cameras.count).toBeGreaterThan(0);
+        for (let i = 0; i < cameras.count; i++) {
+          const at = centre(cameras, i);
+          expect(near(at, 0.23)).toBe(2);
+          expect(near(at, 0.15)).toBe(0);
+        }
+      }
+    }
+  });
+
+  it('joins the crowd’s heads and arms to their bodies, with hands clear of the hips', () => {
+    for (const quality of [desktop, phone]) {
+      const world = buildScene(quality);
+      const box = (/** @type {string} */ name) => {
+        const mesh = /** @type {InstancedMesh} */ (world.scene.getObjectByName(name));
+        mesh.geometry.computeBoundingBox();
+        return /** @type {import('three').Box3} */ (mesh.geometry.boundingBox);
+      };
+      // The neck (head origin 1.47 up, scaled by height like the body) reaches into the shoulders.
+      expect(box('crowd-heads').min.y + 1.47).toBeLessThan(box('crowd-bodies').max.y);
+      // Arms hang from a ball at the shoulder, so a raised arm has no open end.
+      expect(box('crowd-arms').max.y).toBeGreaterThan(0.05);
+      // Arms by their sides: the hands stay outside the hips (radius 0.25, scaled by build).
+      world.update(STILL_T);
+      const bodies = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-bodies'));
+      const arms = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-arms'));
+      const m = new Matrix4();
+      const body = new Matrix4();
+      let resting = 0;
+      for (let i = 0; i < arms.count; i++) {
+        const hand = CROWD_HAND.clone().applyMatrix4(arms.getMatrixAt(i, m));
+        bodies.getMatrixAt(Math.floor(i / 2), body);
+        const local = hand.clone().applyMatrix4(body.clone().invert());
+        if (local.y > 0.85 || local.z > 0.2) continue; // raised, or in front
+        resting++;
+        expect(Math.hypot(local.x, local.z) - 0.075).toBeGreaterThan(0.25);
+      }
+      expect(resting).toBeGreaterThan(10);
+    }
+  });
+
+  it('draws everyone’s eyes as small dark dots, left out of the ink outline', () => {
+    const world = buildScene(desktop);
+    const head = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-heads'));
+    const colors = head.geometry.getAttribute('color');
+    const position = head.geometry.getAttribute('position');
+    /** @type {Vector3[]} */
+    const eye = [];
+    for (let i = 0; i < colors.count; i++)
+      if (colors.getX(i) < 0.5) eye.push(new Vector3().fromBufferAttribute(position, i));
+    expect(eye.length).toBeGreaterThan(0);
+    for (const sx of [-1, 1]) {
+      const one = eye.filter((p) => Math.sign(p.x) === sx);
+      const span = (/** @type {'x' | 'y'} */ k) =>
+        Math.max(...one.map((p) => p[k])) - Math.min(...one.map((p) => p[k]));
+      expect(span('x')).toBeLessThan(0.045);
+      expect(span('y')).toBeLessThan(0.055);
+    }
+    // The head's own outline hull leaves the eyes out: an ink ring round each made them stare.
+    const hull = /** @type {import('three').BufferGeometry} */ (head.userData.hull);
+    hull.computeBoundingBox();
+    head.geometry.computeBoundingBox();
+    const front = /** @type {import('three').Box3} */ (head.geometry.boundingBox).max.z;
+    expect(Math.max(...eye.map((p) => p.z))).toBeCloseTo(front);
+    expect(/** @type {import('three').Box3} */ (hull.boundingBox).max.z).toBeLessThan(front - 0.005);
+  });
+
+  it('puts each influencer’s phone in their hand, or on the selfie stick they hold', () => {
+    const world = buildScene(desktop);
+    /** @type {{ phone: Vector3, hand: Vector3, stick: boolean }[]} */
+    const held = [];
+    world.scene.traverse((o) => o.userData.held && held.push(o.userData.held));
+    expect(held.length).toBe(9);
+    for (const { phone: at, hand, stick } of held) {
+      // A phone 0.36 tall, its lower end in a hand 0.075 across; or on the end of a
+      // stick that runs from the hand into its back.
+      if (stick) expect(at.distanceTo(hand)).toBeCloseTo(0.69, 1);
+      else expect(at.distanceTo(hand)).toBeLessThan(0.12);
     }
   });
 

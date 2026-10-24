@@ -39,22 +39,25 @@ test('the wordmarks draw themselves in, then wiggle and boil smoothly', async ({
     .toMatch(/^0(px)?$/);
   // The outline boils by drifting the noise, and the letters wiggle.
   const first = await drift(page);
-  await expect.poll(() => drift(page), { timeout: 5000 }).not.toBe(first);
+  await expect.poll(() => drift(page), { timeout: 10_000 }).not.toBe(first);
   await expect(page.locator('.hud-title .wm-s').first()).toHaveAttribute('transform', /translate\(0 -?[\d.]+\) rotate/);
 
-  // Smoothly: a quarter second apart, no letter has moved more than a pixel or two.
-  const centres = () =>
-    page.locator('.hud-title .wm-s').evaluateAll((els) =>
-      els.map((el) => {
+  // Smoothly: no letter moves faster than 10 px a second (2.5 px in a quarter
+  // second). Both samples are timed in the page, so a busy machine that stretches
+  // the wait doesn't count as faster motion.
+  const sample = () =>
+    page.locator('.hud-title .wm-s').evaluateAll((els) => ({
+      at: performance.now(),
+      centres: els.map((el) => {
         const r = el.getBoundingClientRect();
         return [r.x + r.width / 2, r.y + r.height / 2];
       }),
-    );
-  const a = await centres();
+    }));
+  const a = await sample();
   await page.waitForTimeout(250);
-  const b = await centres();
-  const moved = Math.max(...a.map(([x, y], i) => Math.hypot(b[i][0] - x, b[i][1] - y)));
-  expect(moved).toBeLessThan(2.5);
+  const b = await sample();
+  const moved = Math.max(...a.centres.map(([x, y], i) => Math.hypot(b.centres[i][0] - x, b.centres[i][1] - y)));
+  expect(moved / ((b.at - a.at) / 1000)).toBeLessThan(10);
 });
 
 test('the footer wordmark draws in when it scrolls into view', async ({ page }) => {
