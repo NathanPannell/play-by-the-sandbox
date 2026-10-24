@@ -1,4 +1,17 @@
-import { BoxGeometry, Color, InstancedMesh, Mesh, Shape, ShapeGeometry, Texture, Vector2, Vector3 } from 'three';
+import {
+  BoxGeometry,
+  Color,
+  InstancedMesh,
+  Matrix4,
+  Mesh,
+  MeshToonMaterial,
+  NearestFilter,
+  Shape,
+  ShapeGeometry,
+  Texture,
+  Vector2,
+  Vector3,
+} from 'three';
 import { describe, expect, it } from 'vitest';
 import {
   BOIL_FPS,
@@ -21,7 +34,7 @@ import {
   pickQuality,
   rng,
 } from '../src/hero/quality.js';
-import { Batch, EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
+import { Batch, EYE, MARQUEE_YELLOW, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
 const phone = pickQuality({ width: 390, devicePixelRatio: 3, coarsePointer: true });
@@ -82,6 +95,10 @@ describe('quality', () => {
     expect(cpu.lite).toBe(true);
     expect(cpu.dpr).toBe(SOFTWARE_SCALE);
     expect(cpu.msaa).toBe(0);
+    // Software renderers keep the cel shading and outlines but skip the crayon strokes.
+    expect(cpu.strokes).toBe(false);
+    expect(phone.strokes).toBe(true);
+    expect(desktop.strokes).toBe(true);
     expect(cpu.frameSkip).toBe(2);
     expect(cpu.crowd).toBe(phone.crowd);
     expect(desktop.lite).toBe(false);
@@ -297,9 +314,10 @@ describe('scene', () => {
     expect(colours(letters)).toEqual(lettersAt1);
     expect(colours(bulbs)).not.toEqual(bulbsAt1);
     expect(colours(chasers)).not.toEqual(chasersAt1);
-    // Bright: every letter pixel is the same warm marquee yellow.
+    // Bright: every letter pixel is the same soft, warm marquee yellow.
     const yellow = new Color();
-    for (let i = 0; i < letters.count; i++) expect(letters.getColorAt(i, yellow).getHexString()).toBe('ffc93a');
+    for (let i = 0; i < letters.count; i++)
+      expect(letters.getColorAt(i, yellow).getHexString()).toBe(MARQUEE_YELLOW.slice(1).toLowerCase());
   });
 
   it('draws light sources in full colour, warmed toward white, straight to the screen', () => {
@@ -344,6 +362,114 @@ describe('scene', () => {
     const a = snapshot(world.scene);
     world.update(3.5);
     expect(snapshot(world.scene)).not.toEqual(a); // the crowd still moves
+  });
+
+  it('is cel-shaded: toon materials with three flat bands and a crisp terminator', () => {
+    const world = buildScene(desktop);
+    /** @type {Set<import('three').MeshToonMaterial>} */
+    const toons = new Set();
+    world.scene.traverse((o) => {
+      const material = /** @type {import('three').Material | undefined} */ (/** @type {Mesh} */ (o).material);
+      if (material instanceof MeshToonMaterial) toons.add(material);
+      // No old smooth-lit materials left.
+      expect(material?.type).not.toBe('MeshLambertMaterial');
+    });
+    expect(toons.size).toBeGreaterThan(3);
+    for (const m of toons) {
+      const ramp = /** @type {import('three').DataTexture} */ (m.gradientMap);
+      expect(ramp.magFilter).toBe(NearestFilter);
+      expect(new Set(ramp.image.data).size).toBe(3);
+    }
+  });
+
+  it('keeps to muted pastels: no saturated primaries anywhere in the scene', () => {
+    for (const quality of [desktop, phone]) {
+      const world = buildScene(quality);
+      let worst = 0;
+      let where = '';
+      const c = new Color();
+      /** @param {number} r @param {number} g @param {number} b @param {string} name */
+      const check = (r, g, b, name) => {
+        c.setRGB(r, g, b);
+        const { r: sr, g: sg, b: sb } = c.clone().convertLinearToSRGB();
+        const chroma = Math.max(sr, sg, sb) - Math.min(sr, sg, sb);
+        if (chroma > worst) [worst, where] = [chroma, name];
+      };
+      world.scene.traverse((o) => {
+        const mesh = /** @type {Mesh} */ (o);
+        if (!mesh.isMesh) return;
+        const colors = mesh.geometry.getAttribute('color');
+        if (colors)
+          for (let i = 0; i < colors.count; i += 3)
+            check(colors.getX(i), colors.getY(i), colors.getZ(i), mesh.name || 'mesh');
+        const inst = /** @type {InstancedMesh} */ (mesh).instanceColor;
+        if (inst)
+          for (let i = 0; i < inst.count; i++)
+            check(inst.getX(i), inst.getY(i), inst.getZ(i), mesh.name || 'instances');
+      });
+      // The old scene's red carpet and primary banners were around 0.7; pastels stay under 0.45.
+      expect(worst, where).toBeLessThan(0.45);
+    }
+  });
+
+  it('stands people and props on what is under them, with contact shadows', () => {
+    const world = buildScene(desktop);
+    world.update(STILL_T);
+    world.scene.updateMatrixWorld(true);
+    // The influencers' shoes touch the carpet or the plaza.
+    const shadows = /** @type {InstancedMesh} */ (world.scene.getObjectByName('moving-shadows'));
+    let feet = 0;
+    world.scene.traverse((o) => {
+      const mesh = /** @type {Mesh} */ (o);
+      if (!mesh.isMesh || mesh.parent?.type !== 'Group' || !mesh.parent.position.lengthSq()) return;
+      if (/** @type {InstancedMesh} */ (mesh).isInstancedMesh || mesh.name === 'outline') return;
+      if (mesh.parent.position.x === -120 || Math.abs(mesh.parent.position.z - 23) < 0.01) return; // limos
+      mesh.geometry.computeBoundingBox();
+      const lowest = /** @type {import('three').Box3} */ (mesh.geometry.boundingBox).min.y;
+      expect(Math.abs(lowest)).toBeLessThan(0.02);
+      feet++;
+    });
+    expect(feet).toBe(9);
+    // Everyone moving has a shadow: the crowd, the influencers and both limos.
+    expect(shadows.count).toBeGreaterThan(desktop.crowd + 9);
+    expect(world.scene.getObjectByName('contact-shadows')).toBeTruthy();
+    // The crowd's bodies stand on their shoes at the ground.
+    const crowdBody = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-bodies'));
+    crowdBody.geometry.computeBoundingBox();
+    expect(Math.abs(/** @type {import('three').Box3} */ (crowdBody.geometry.boundingBox).min.y)).toBeLessThan(0.01);
+  });
+
+  it('gives everyone in the crowd hair, with long hair only on the full tier', () => {
+    for (const quality of [desktop, phone]) {
+      const world = buildScene(quality);
+      world.update(STILL_T);
+      const bodies = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-bodies'));
+      const short = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-hair'));
+      const long = /** @type {InstancedMesh | undefined} */ (world.scene.getObjectByName('crowd-hair-long'));
+      expect(short.count + (long?.count ?? 0)).toBe(bodies.count);
+      if (quality.lite) expect(long).toBeUndefined();
+      else expect(long?.count).toBeGreaterThan(0);
+      // Every hair instance sits on a head, none left at the origin.
+      const m = new Matrix4();
+      const at = new Vector3();
+      for (const mesh of [short, long]) {
+        if (!mesh) continue;
+        for (let i = 0; i < mesh.count; i++) {
+          at.setFromMatrixPosition(mesh.getMatrixAt(i, m));
+          expect(at.y).toBeGreaterThan(0.8);
+        }
+      }
+    }
+  });
+
+  it('keeps sparkles out of the viewer’s face', () => {
+    const world = buildScene(desktop);
+    world.update(STILL_T);
+    const sparkles = /** @type {InstancedMesh} */ (world.scene.getObjectByName('sparkles'));
+    const m = new Matrix4();
+    const at = new Vector3();
+    for (let i = 0; i < sparkles.count; i++)
+      expect(at.setFromMatrixPosition(sparkles.getMatrixAt(i, m)).distanceTo(EYE)).toBeGreaterThan(6.5);
   });
 
   it('shows the site ads on the projector wall when given them', () => {
@@ -417,7 +543,8 @@ describe('crayon on the models', () => {
       const world = buildScene(quality);
       const kit = createCrayon({ lite: quality.lite });
       const outlined = kit.apply(world.scene);
-      expect(outlined).toBeGreaterThan(10);
+      // The scenery shares one hull; the crowd, influencers and limos have their own.
+      expect(outlined).toBeGreaterThan(6);
       /** @type {Set<import('three').Material>} */
       const coloured = new Set();
       world.scene.traverse((o) => {
@@ -438,13 +565,38 @@ describe('crayon on the models', () => {
       const material = [...coloured][0];
       material.onBeforeCompile(/** @type {any} */ (shader), /** @type {any} */ (null));
       expect(shader.vertexShader).toContain('vCrayonPos = position;');
-      expect(shader.fragmentShader).toMatch(/#include <color_fragment>\n[\s\S]*diffuseColor\.rgb = mix\(paper/);
-      expect(Object.keys(shader.uniforms)).toEqual(['tCrayon', 'uCrayonVariant', 'uCrayonPaper']);
+      expect(shader.fragmentShader).toMatch(
+        /#include <color_fragment>\n[\s\S]*diffuseColor\.rgb = mix\(diffuseColor\.rgb \* 1\.03, deeper/,
+      );
+      expect(Object.keys(shader.uniforms)).toEqual(['tCrayon', 'uCrayonVariant', 'uCrayonRim']);
       expect(Boolean(material.defines?.CRAYON_LITE)).toBe(quality.lite);
       // Every crayon material shares one compiled program per tier.
       expect(material.customProgramCacheKey()).toBe(quality.lite ? 'crayon-lite' : 'crayon');
       kit.dispose();
     }
+  });
+
+  it('leaves out the wax strokes for software renderers, keeping the cel shading and rim', () => {
+    const world = buildScene(desktop);
+    const kit = createCrayon({ lite: true, strokes: false });
+    kit.apply(world.scene);
+    /** @type {import('three').Material | undefined} */
+    let toonMaterial;
+    world.scene.traverse((o) => {
+      const m = /** @type {Mesh} */ (o).material;
+      if (m instanceof MeshToonMaterial && !toonMaterial) toonMaterial = m;
+    });
+    const material = /** @type {import('three').Material} */ (toonMaterial);
+    const shader = {
+      uniforms: {},
+      vertexShader: '#include <common>\n#include <begin_vertex>',
+      fragmentShader: '#include <common>\n#include <color_fragment>\n#include <opaque_fragment>',
+    };
+    material.onBeforeCompile(/** @type {any} */ (shader), /** @type {any} */ (null));
+    expect(shader.fragmentShader).not.toContain('deeper');
+    expect(shader.fragmentShader).toContain('#ifdef CRAYON_RIM');
+    expect(material.customProgramCacheKey()).toBe('crayon-plain');
+    kit.dispose();
   });
 
   it('outlines the solids with an ink hull that follows instanced crowds', () => {

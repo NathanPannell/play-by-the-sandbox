@@ -82,6 +82,7 @@ function start(root) {
   // Crayon on the models: strokes in each material, ink outlines on the solids.
   const crayon = createCrayon({
     lite: quality.lite,
+    strokes: quality.strokes,
     anisotropy: Math.min(8, renderer.capabilities.getMaxAnisotropy()),
   });
   crayon.apply(world.scene);
