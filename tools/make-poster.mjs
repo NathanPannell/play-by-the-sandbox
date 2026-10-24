@@ -5,7 +5,7 @@
 //
 //   npm run poster
 //
-// Re-run it after changing the scene or the crayon pass, and commit the images.
+// Re-run it after changing the scene or its crayon (src/hero/crayon.js), and commit the images.
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import { build } from '../scripts/build.mjs';

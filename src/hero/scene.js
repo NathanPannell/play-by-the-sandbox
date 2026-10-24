@@ -59,6 +59,7 @@ import {
   ZeroFactor,
 } from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { hullGeometry } from './crayon.js';
 import { bulbLayout } from './marquee.js';
 import { BLUE, BRIGHTS, GREEN, INK, ORANGE, PINK, PURPLE, RED, YELLOW } from './palette.js';
 import { hash1, rng } from './quality.js';
@@ -90,9 +91,9 @@ export const STILL_T = 11.2;
 const CYCLE = 26; // seconds for a limo to pull up, wait and leave
 
 /**
- * Additive light (searchlight and projector beams) that leaves the render
- * target's alpha alone, so a beam in front of the marquee can't dim its glow
- * (see glowMaterial).
+ * Additive light (searchlight and projector beams): it adds to what's behind
+ * and leaves the alpha alone. Not coloured in by crayon.js (it's light, not a
+ * thing).
  */
 const LIGHT_BEAM = {
   blending: CustomBlending,
@@ -108,10 +109,14 @@ const LIGHT_BEAM = {
 
 /**
  * Collects static geometry with a baked colour, then merges it into one mesh.
+ * The solid parts (not flat shapes, which have no inside) also make up the
+ * mesh's ink outline hull (userData.hull, drawn by crayon.js).
  */
-class Batch {
+export class Batch {
   /** @type {BufferGeometry[]} */
   parts = [];
+  /** @type {BufferGeometry[]} */
+  solids = [];
 
   /**
    * @param {BufferGeometry} geometry
@@ -129,6 +134,11 @@ class Batch {
     for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
     g.setAttribute('color', new BufferAttribute(colors, 3));
     this.parts.push(g);
+    if (geometry.type !== 'ShapeGeometry' && geometry.type !== 'PlaneGeometry') {
+      const solid = new BufferGeometry();
+      solid.setAttribute('position', /** @type {BufferAttribute} */ (g.getAttribute('position')).clone());
+      this.solids.push(solid);
+    }
     geometry.dispose();
   }
 
@@ -166,7 +176,15 @@ class Batch {
     const material = lit
       ? new MeshLambertMaterial({ vertexColors: true, flatShading: true })
       : new MeshBasicMaterial({ vertexColors: true });
-    return new Mesh(geometry, material);
+    const mesh = new Mesh(geometry, material);
+    if (this.solids.length) {
+      const solids = mergeGeometries(this.solids);
+      mesh.userData.hull = hullGeometry(solids);
+      solids.dispose();
+      this.solids.forEach((p) => p.dispose());
+      this.solids = [];
+    }
+    return mesh;
   }
 }
 
@@ -212,15 +230,23 @@ export function buildScene(quality, { adTexture = null } = {}) {
   sun.position.set(-14, 26, 22);
   scene.add(sun);
 
-  scene.add(sky());
-  scene.add(gallery());
-  scene.add(plaza());
-  scene.add(robsonSquare(random));
-  scene.add(eastSide());
-  scene.add(acrossTheStreet(random));
-  scene.add(skyline(random, quality.lite ? 26 : 44, !quality.lite));
+  // Scenery that never moves: its outlines can share one draw (crayon.js).
+  const scenery = [
+    sky(),
+    gallery(),
+    plaza(),
+    robsonSquare(random),
+    eastSide(),
+    acrossTheStreet(random),
+    skyline(random, quality.lite ? 26 : 44, !quality.lite),
+  ];
+  for (const part of scenery) {
+    part.traverse((o) => (o.userData.still = true));
+    scene.add(part);
+  }
 
   const marquee = marqueeSign();
+  marquee.group.traverse((o) => (o.userData.still = true));
   scene.add(marquee.group);
 
   const ad = adScreen(adTexture);
@@ -333,6 +359,7 @@ function sky() {
         vec3 c = mix(mix(mid, low, west), mid, smoothstep(-0.02, 0.16, vDir.y));
         c = mix(c, top, smoothstep(0.16, 0.5, vDir.y));
         gl_FragColor = vec4(c, 1.0);
+        #include <colorspace_fragment>
       }`,
   });
   const dome = new Mesh(geometry, material);
@@ -737,10 +764,9 @@ function skyline(random, count, windows) {
 }
 
 /**
- * An unlit material that marks its pixels as glowing: it writes alpha 0 into
- * the render target, which the crayon pass reads as "light source" (full
- * colour, no ink, a hatched halo around it). Every other material must write
- * alpha 1. Works on plain and instanced meshes.
+ * An unlit material for light sources (the marquee, camera flashes): full
+ * colour, warmed toward white, no crayon strokes and no outline. Works on
+ * plain and instanced meshes.
  */
 export function glowMaterial() {
   return new ShaderMaterial({
@@ -762,7 +788,10 @@ export function glowMaterial() {
       }`,
     fragmentShader: /* glsl */ `
       varying vec3 vColor;
-      void main() { gl_FragColor = vec4(vColor, 0.0); }`,
+      void main() {
+        gl_FragColor = vec4(mix(vColor, vec3(1.0, 0.98, 0.9), 0.3), 1.0);
+        #include <colorspace_fragment>
+      }`,
   });
 }
 
@@ -899,6 +928,7 @@ function adScreen(texture) {
         vec3 c = mix(panel, ad, uHasAds);
         // Each slide fades up from a little darker over half a second.
         gl_FragColor = vec4(c * mix(0.75, 1.0, smoothstep(0.0, 0.15, local)), 1.0);
+        #include <colorspace_fragment>
       }`,
   });
   const screen = new Mesh(new PlaneGeometry(w, h), material);
@@ -1092,6 +1122,7 @@ function crowd(count, paparazzi, random) {
     new MeshLambertMaterial({ color: INK }),
     Math.max(1, paparazzi),
   );
+  for (const m of [body, head, arms, cameras]) m.userData.outline = true;
   const skin = SKIN.map((c) => new Color(c));
   folks.forEach((f, i) => {
     body.setColorAt(i, new Color(f.camera ? '#3A3550' : BRIGHTS[Math.floor(random() * BRIGHTS.length)]));
@@ -1124,8 +1155,9 @@ function crowd(count, paparazzi, random) {
       s.set(f.h, f.h, f.h);
       body.setMatrixAt(i, m.compose(p.set(f.x, hop, f.z), q, s));
       head.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.55 * f.h, f.z), q, s));
-      const armsUp = f.arms || f.camera ? 1 : 0.0001;
-      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.15 * f.h, f.z), q, s.set(f.h, f.h * armsUp, f.h)));
+      // Arms down are hidden whole (scale 0): a squashed strip would still get an outline.
+      const armsUp = f.arms || f.camera ? f.h : 0;
+      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.15 * f.h, f.z), q, s.set(armsUp, armsUp, armsUp)));
       if (f.phone || f.camera) {
         const lift = f.camera ? 1.62 : 1.9 + 0.25 * Math.sin(t * 1.3 + f.phase);
         p.set(f.x + Math.sin(f.ry) * 0.38, hop + lift * f.h, f.z + Math.cos(f.ry) * 0.38);
@@ -1200,6 +1232,12 @@ function influencers(random, still) {
     });
     const first = /** @type {Mesh} */ (figures[0].group.children[0]);
     const one = new Mesh(mergeGeometries(merged), first.material);
+    const hulls = figures.map((f) => {
+      const mesh = /** @type {Mesh} */ (f.group.children[0]);
+      return /** @type {BufferGeometry} */ (mesh.userData.hull).clone().applyMatrix4(f.group.matrixWorld);
+    });
+    one.userData.hull = mergeGeometries(hulls);
+    hulls.forEach((g) => g.dispose());
     figures.forEach((f) => /** @type {Mesh} */ (f.group.children[0]).geometry.dispose());
     merged.forEach((g) => g.dispose());
     const frozen = new Group();
@@ -1273,8 +1311,7 @@ function limo(color) {
 /**
  * Camera flashes: instanced star bursts at phones and cameras. Each slot fires
  * on its own beat (so the pattern doesn't depend on frame rate), rises over a
- * couple of frames and fades over a few more, and glows through the crayon
- * pass instead of popping in and out.
+ * couple of frames and fades over a few more, and glows instead of popping in and out.
  * @param {Emitter[]} emitters
  * @param {number} slots
  */

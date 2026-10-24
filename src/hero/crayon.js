@@ -1,50 +1,59 @@
-// The crayon pass. The scene renders into a target with a depth texture, then
-// this full-screen shader redraws it on paper: hue-preserving posterised colour,
-// waxy coverage that skips the paper's grain, hatched strokes that follow the
-// luminance gradient near edges and run diagonally elsewhere, cross-hatching in
-// the darks, a little colour bleed, glowing light sources with a halo, and
-// wobbly ink outlines from a colour Sobel and a depth Laplacian (on inverse
-// depth, which is flat across any plane, so the ground doesn't sprout contour
-// lines).
+// Crayon on the models themselves. No full-screen pass: each lit or unlit
+// material in the scene is coloured in with wax strokes, and each solid gets
+// an ink outline drawn as an inverted hull.
 //
-// The crayon marks are drawn on the surfaces, not on the screen. Each pixel's
-// world position comes back from the depth texture, and the hatching (and the
-// regions that vary its angle) is laid on the surface it lands on, projected
-// from the axis the surface faces most (triplanar). So as the camera turns,
-// strokes stay on the gallery, the screens and the props, instead of the
-// scene sliding behind a fixed sheet of texture. To keep strokes about the
-// same width on screen at any distance, each is drawn at two power-of-two
-// scales around the size of a CSS pixel there and cross-faded by distance:
-// both scales are fixed to the world, so nothing swims or pops. Only the
-// paper's tooth stays fixed to the screen, as paper would.
+// The strokes come from one small texture made at load time (crayonTexture):
+// overlapping tapered strokes with the paper showing through the gaps, a
+// little wax tooth, and four slightly redrawn versions of the same strokes in
+// its four channels. A material samples it triplanar in its own object space,
+// so the strokes stick to the surface and move with it, at a fixed size on the
+// object (STROKE_TILE metres a tile). Each face orientation turns the strokes
+// its own way, as if coloured in by hand, and a second sample at another
+// scale and angle keeps big walls from showing the tile. The wax takes the
+// material's own colour; the gaps are a pale tint of it, lit like the rest of
+// the surface, so they read as paper on the object rather than white speckle.
+// Mipmaps and anisotropic filtering keep distant and grazing surfaces from
+// shimmering.
 //
-// Nothing changes abruptly from one frame to the next, so it doesn't flicker
-// as the camera turns: the posterised steps and the wax coverage are soft
-// rather than hard thresholds. The one deliberate jump is the "boil": like
-// hand-drawn animation, the strokes and the outline wobble step through
-// BOIL_VARIANTS slightly different drawings, BOIL_FPS times a second. A small
-// offset each, never a reseed, so it reads as the same drawing redrawn. Under
-// reduced motion the page draws one still frame, on one variant.
-import { Color, Matrix4, Mesh, OrthographicCamera, PlaneGeometry, Scene, ShaderMaterial, Vector2 } from 'three';
+// The outlines are back faces pushed out along smoothed normals by a constant
+// width on screen, with a little jitter along their length.
+//
+// The boil: like hand-drawn animation, the drawing steps through its
+// BOIL_VARIANTS redrawn versions BOIL_FPS times a second, the texture channel
+// and the outline jitter together. A paused or reduced-motion frame holds one.
+import {
+  BackSide,
+  BufferGeometry,
+  Color,
+  DataTexture,
+  InstancedMesh,
+  LinearFilter,
+  LinearMipmapLinearFilter,
+  Mesh,
+  MeshBasicMaterial,
+  MeshLambertMaterial,
+  NormalBlending,
+  RepeatWrapping,
+  RGBAFormat,
+  ShaderMaterial,
+  UniformsLib,
+  UniformsUtils,
+  Vector2,
+  Vector4,
+} from 'three';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { INK, PAPER } from './palette.js';
 
 /** How many times a second the drawing boils to its next variant. */
 export const BOIL_FPS = 5;
-/** How many slightly different drawings the boil cycles through. */
+/** How many redrawn versions of the strokes the boil cycles through (one per texture channel). */
 export const BOIL_VARIANTS = 4;
-/** The most the outline wobble moves a line, in CSS pixels. */
-export const WOBBLE_PX = 2.2;
-/**
- * Each variant's nudge: the strokes' offset (in their own units, about a CSS
- * pixel, so mostly across the strokes) and the outline wobble's offset (in its
- * noise cells).
- */
-export const VARIANTS = [
-  { strokes: [0, 0], wobble: [0, 0] },
-  { strokes: [0.4, 1.25], wobble: [0.55, 0.3] },
-  { strokes: [0.9, 0.45], wobble: [0.2, 0.75] },
-  { strokes: [0.2, 1.7], wobble: [0.8, 0.5] },
-];
+/** One tile of the stroke texture covers this much of a surface, in metres. */
+export const STROKE_TILE = 1.6;
+/** The ink outline's width on screen, in CSS pixels. */
+export const OUTLINE_PX = 2;
+/** The stroke texture's size in texels (square, tileable). */
+export const TEXTURE_SIZE = 256;
 
 /** Which variant the boil shows at a moment. @param {number} seconds */
 export function boilStep(seconds) {
@@ -52,307 +61,391 @@ export function boilStep(seconds) {
   return n < 0 ? n + BOIL_VARIANTS : n;
 }
 
-const vertexShader = /* glsl */ `
-varying vec2 vUv;
-void main() {
-  vUv = uv;
-  gl_Position = vec4(position.xy, 0.0, 1.0);
+/** A small seeded random generator (mulberry32). @param {number} seed */
+function random(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The crayon strokes as RGBA data: wax coverage (0 paper, 255 solid wax) for
+ * BOIL_VARIANTS redrawn versions of the same strokes, one per channel. It
+ * tiles seamlessly: strokes and tooth wrap around the edges.
+ * @param {number} [size]
+ * @param {number} [seed]
+ */
+export function crayonTexture(size = TEXTURE_SIZE, seed = 2027) {
+  const r = random(seed);
+  const s = size / 256;
+  // Hatching, the way a child colours in: rows of tapered strokes back and
+  // forth along x (each face turns them its own way), a row apart with paper
+  // between, overlapping and pressed harder or lighter, a few going astray.
+  /** @type {{ x: number, y: number, angle: number, length: number, width: number, pressure: number, jitter: number[][] }[]} */
+  const strokes = [];
+  const jitter = () => Array.from({ length: BOIL_VARIANTS }, () => [r() - 0.5, r() - 0.5, r() - 0.5, r() - 0.5]);
+  const rowGap = 9.5 * s;
+  const rows = Math.round(size / rowGap);
+  for (let row = 0; row < rows; row++) {
+    const y = ((row + 0.5) * size) / rows;
+    const slope = (r() - 0.5) * 0.12;
+    for (let x = r() * 40 * s; x < size;) {
+      const length = (70 + r() * 90) * s;
+      strokes.push({
+        x: x + length / 2,
+        y: y + (r() - 0.5) * 2.5 * s,
+        angle: slope + (r() - 0.5) * 0.05,
+        length,
+        width: (5.5 + r() * 3.5) * s,
+        pressure: 0.55 + r() * 0.45,
+        jitter: jitter(),
+      });
+      x += length * (0.55 + r() * 0.5);
+    }
+  }
+  for (let i = 0; i < Math.round(14 * s * s); i++) {
+    strokes.push({
+      x: r() * size,
+      y: r() * size,
+      angle: (r() - 0.5) * 0.9,
+      length: (50 + r() * 70) * s,
+      width: (4 + r() * 3) * s,
+      pressure: 0.5 + r() * 0.4,
+      jitter: jitter(),
+    });
+  }
+  // The paper's tooth that the wax skips over: tileable value noise, a couple of texels across.
+  const cells = Math.max(4, Math.round(size / 2.5));
+  const lattice = Float32Array.from({ length: cells * cells }, () => r());
+  /** @param {number} x @param {number} y */
+  const tooth = (x, y) => {
+    const fx = (x / size) * cells;
+    const fy = (y / size) * cells;
+    const x0 = Math.floor(fx);
+    const y0 = Math.floor(fy);
+    const u = fx - x0;
+    const v = fy - y0;
+    const at = (/** @type {number} */ i, /** @type {number} */ j) =>
+      lattice[(((j % cells) + cells) % cells) * cells + (((i % cells) + cells) % cells)];
+    const a = at(x0, y0) + (at(x0 + 1, y0) - at(x0, y0)) * u;
+    const b = at(x0, y0 + 1) + (at(x0 + 1, y0 + 1) - at(x0, y0 + 1)) * u;
+    return a + (b - a) * v;
+  };
+
+  const data = new Uint8Array(size * size * 4);
+  const wax = new Float32Array(size * size);
+  for (let k = 0; k < BOIL_VARIANTS; k++) {
+    wax.fill(0);
+    for (const st of strokes) {
+      // Each variant redraws the stroke a little differently: shifted, turned, pressed.
+      const [jx, jy, ja, jp] = st.jitter[k];
+      const cx = st.x + jx * 2.4 * s;
+      const cy = st.y + jy * 2.4 * s;
+      const angle = st.angle + ja * 0.06;
+      const pressure = Math.min(1, st.pressure * (1 + jp * 0.16));
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+      for (let t = -st.length / 2; t <= st.length / 2; t += 1) {
+        const along = t / st.length + 0.5;
+        const radius = (st.width / 2) * Math.sin(Math.PI * along) ** 0.3;
+        const px = cx + dx * t;
+        const py = cy + dy * t;
+        const reach = Math.ceil(radius + 1);
+        const outer = (radius + 0.5) * (radius + 0.5);
+        for (let oy = -reach; oy <= reach; oy++) {
+          const iy = Math.floor(py) + oy;
+          const ey = iy + 0.5 - py;
+          const row = ((iy % size) + size) % size;
+          for (let ox = -reach; ox <= reach; ox++) {
+            const ix = Math.floor(px) + ox;
+            const ex = ix + 0.5 - px;
+            const d2 = ex * ex + ey * ey;
+            if (d2 >= outer) continue;
+            const cover = Math.min(1, radius + 0.5 - Math.sqrt(d2)) * pressure;
+            const i = row * size + (((ix % size) + size) % size);
+            if (cover > wax[i]) wax[i] = cover;
+          }
+        }
+      }
+    }
+    for (let i = 0; i < size * size; i++) {
+      const x = i % size;
+      const y = (i / size) | 0;
+      // Wax catches the tops of the tooth and misses the valleys.
+      const v = wax[i] * Math.min(1, 0.45 + 0.85 * tooth(x, y));
+      data[i * 4 + k] = Math.round(Math.min(1, v) * 255);
+    }
+  }
+  return data;
+}
+
+/**
+ * The texture for the GPU: repeating, mipmapped and anisotropically filtered,
+ * so it neither tiles at the edges nor shimmers at a distance.
+ * @param {number} [anisotropy]
+ */
+export function crayonMap(anisotropy = 1) {
+  const map = new DataTexture(crayonTexture(), TEXTURE_SIZE, TEXTURE_SIZE, RGBAFormat);
+  map.wrapS = map.wrapT = RepeatWrapping;
+  map.magFilter = LinearFilter;
+  map.minFilter = LinearMipmapLinearFilter;
+  map.generateMipmaps = true;
+  map.anisotropy = anisotropy;
+  map.needsUpdate = true;
+  return map;
+}
+
+const vertexPars = /* glsl */ `
+varying vec3 vCrayonPos;
+varying vec3 vCrayonNormal;
+`;
+const vertexMain = /* glsl */ `
+vCrayonPos = position;
+vCrayonNormal = normal;
+`;
+const fragmentPars = /* glsl */ `
+uniform sampler2D tCrayon;
+uniform vec4 uCrayonVariant;
+uniform vec3 uCrayonPaper;
+varying vec3 vCrayonPos;
+varying vec3 vCrayonNormal;
+// Sampled with explicit gradients (from the position, which is continuous), so
+// a switch between projection planes or face angles doesn't make the GPU pick
+// the blurriest mip along it and draw a seam.
+float crayonAt(vec2 uv, vec2 gx, vec2 gy) { return dot(textureGrad(tCrayon, uv, gx, gy), uCrayonVariant); }
+vec2 crayonTurn(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
+// Each face orientation colours in at its own angle, as a hand would.
+float crayonAngle(vec3 n) {
+  vec3 q = floor(n * 3.0 + 0.5);
+  return fract(sin(dot(q, vec3(12.9898, 78.233, 37.719))) * 43758.5453) * 3.14159;
+}
+// The strokes, pressed harder and lighter in broad patches (the same texture,
+// far bigger and turned, so blurred by its mipmaps), which also keeps a big
+// wall from showing the tile.
+float crayonPlane(vec2 p, vec2 px, vec2 py, float a) {
+  float k = 1.0 / ${STROKE_TILE.toFixed(3)};
+  vec2 q = crayonTurn(p, a) * k;
+  vec2 gx = crayonTurn(px, a) * k;
+  vec2 gy = crayonTurn(py, a) * k;
+  float pressure = crayonAt(crayonTurn(q, 1.9) * 0.11 + 0.37, crayonTurn(gx, 1.9) * 0.11, crayonTurn(gy, 1.9) * 0.11);
+  return crayonAt(q, gx, gy) * mix(0.72, 1.18, pressure);
+}
+float crayonWax(vec3 p, vec3 n) {
+  vec3 an = abs(n);
+  float a = crayonAngle(n);
+  vec3 dx = dFdx(p);
+  vec3 dy = dFdy(p);
+  #ifdef CRAYON_LITE
+  // Phones: only the plane the surface faces most.
+  bool onX = an.x >= an.y && an.x >= an.z;
+  bool onY = !onX && an.y >= an.z;
+  return crayonPlane(
+    onX ? p.zy : onY ? p.xz : p.xy,
+    onX ? dx.zy : onY ? dx.xz : dx.xy,
+    onX ? dy.zy : onY ? dy.xz : dy.xy,
+    a + (onX ? 0.0 : onY ? 0.7 : 1.4)
+  );
+  #else
+  vec3 w = an * an * an * an;
+  w /= w.x + w.y + w.z + 1e-6;
+  float v = 0.0;
+  if (w.x > 0.01) v += w.x * crayonPlane(p.zy, dx.zy, dy.zy, a);
+  if (w.y > 0.01) v += w.y * crayonPlane(p.xz, dx.xz, dy.xz, a + 0.7);
+  if (w.z > 0.01) v += w.z * crayonPlane(p.xy, dx.xy, dy.xy, a + 1.4);
+  return v / max(0.01, (w.x > 0.01 ? w.x : 0.0) + (w.y > 0.01 ? w.y : 0.0) + (w.z > 0.01 ? w.z : 0.0));
+  #endif
 }
 `;
-
-const fragmentShader = /* glsl */ `
-precision highp float;
-uniform sampler2D tColor;
-uniform sampler2D tDepth;
-uniform vec2 uRes;
-uniform float uPx;
-uniform float uWobble;
-uniform mat4 uInvViewProj;
-uniform float uTanHalf;
-uniform vec2 uBoilStrokes;
-uniform vec2 uBoilWobble;
-uniform float uNear;
-uniform float uFar;
-uniform vec3 uPaper;
-uniform vec3 uInk;
-uniform vec3 uHalo;
-varying vec2 vUv;
-
-// Integer hash (PCG) of a lattice point. A float hash like
-// fract(p * 234.34) runs out of precision at the coordinates the grain uses
-// (thousands of cells), and its output falls into a repeating lattice that
-// shows as tiling seams, worst at high device pixel ratios.
-uint pcg(uint v) {
-  uint state = v * 747796405u + 2891336453u;
-  uint word = ((state >> ((state >> 28u) + 4u)) ^ state) * 277803737u;
-  return (word >> 22u) ^ word;
-}
-float hash(vec2 p) {
-  uvec2 q = uvec2(ivec2(floor(p)) + 65536);
-  return float(pcg(q.x + pcg(q.y))) * (1.0 / 4294967295.0);
-}
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
-float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
-vec3 toSRGB(vec3 c) {
-  c = clamp(c, 0.0, 1.0);
-  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
-}
-vec3 colAt(vec2 uv) { return toSRGB(texture2D(tColor, uv).rgb); }
-// Light sources (the marquee) write alpha 0; everything else writes 1.
-float glowAt(vec2 uv) { return 1.0 - texture2D(tColor, uv).a; }
-// 1 / view distance: affine in screen space across a plane.
-float invDepthAt(vec2 uv) {
-  float z = texture2D(tDepth, uv).x;
-  return (uFar - z * (uFar - uNear)) / (uNear * uFar);
-}
-// Where a pixel is in the world, from its depth.
-vec3 worldAt(vec2 uv) {
-  float z = texture2D(tDepth, uv).x;
-  vec4 p = uInvViewProj * vec4(uv * 2.0 - 1.0, z * 2.0 - 1.0, 1.0);
-  return p.xyz / p.w;
-}
-mat2 rot(float a) { float c = cos(a), s = sin(a); return mat2(c, -s, s, c); }
-// The finest detail a pattern may have, in noise cells per CSS pixel: under
-// half a cell per device pixel. Finer value noise aliases against the pixel
-// grid into a moire that reads as tiling seams, at some pixel ratios and not
-// others.
-float band(float cellsPerCss) { return min(cellsPerCss, 0.45 * uPx); }
-// Grain lives in a rotated, offset copy of the plane, so its lattice never
-// lines up with the pixel grid either.
-vec2 tilt(vec2 p, float a) { return rot(a) * p + vec2(37.1, 91.7) * a; }
-// Strokes in their own units: q is a point on a surface, in units of about a
-// CSS pixel there (one of the two scales, so between one and two CSS pixels):
-// the frequencies sit a little under the band limit.
-float strokes(vec2 q, float angle, float offset) {
-  vec2 r = rot(angle) * q + uBoilStrokes;
-  return 0.62 * noise(vec2(r.x * 0.03, r.y * 0.6 * band(0.75)) + offset) + 0.38 * noise(vec2(r.x * 0.07, r.y * 0.6 * band(1.7)) + offset * 1.7);
-}
-// The two crayon marks on one plane at one scale: the main strokes (following
-// the screen's luminance gradient where there is one, otherwise diagonal) and,
-// only where it shows, the cross-hatch for the darks.
-vec2 marks(vec2 q, float diagonal, float along, float follow, bool hatch) {
-  float s = strokes(q, diagonal, 0.0);
-  if (follow > 0.001) s = mix(s, strokes(q, along, 0.0), follow);
-  return vec2(s, hatch ? strokes(q, diagonal + 1.25, 3.0) : 0.5);
-}
-// Both scales on one plane, cross-faded, with the contrast the blend loses put back.
-// p is in world units (metres). Each plane has its own hatch angle: an angle
-// that varied across the surface would turn the strokes about the world's
-// origin, far away in stroke units, and swirl them into rings.
-vec2 marksOn(vec2 p, float diagonal, float scale0, float fade, float along, float follow, bool hatch) {
-  #ifdef LITE
-  // Phones: a shorter cross-fade, so most pixels draw only one scale.
-  float w = smoothstep(0.3, 0.7, fade);
-  #else
-  float w = fade;
-  #endif
-  vec2 m = vec2(0.0);
-  if (w < 0.999) m += (1.0 - w) * marks(p / scale0, diagonal, along, follow, hatch);
-  // No offset between scales: a scale must look the same whether it is the finer or the coarser of the pair.
-  if (w > 0.001) m += w * marks(p / (scale0 * 2.0), diagonal, along, follow, hatch);
-  return 0.5 + (m - 0.5) / sqrt((1.0 - w) * (1.0 - w) + w * w);
-}
-// A staircase with soft risers: posterised, but with no hard step to flip.
-float softSteps(float x, float n) {
-  float q = x * n;
-  return (floor(q) + smoothstep(0.3, 0.7, fract(q))) / n;
-}
-
-void main() {
-  vec2 css = gl_FragCoord.xy / uPx;
-  vec2 texel = 1.0 / uRes;
-
-  // A hand that never quite follows the line, a little different each time the drawing boils.
-  vec2 wob = vec2(noise(css * 0.03 + uBoilWobble), noise(css * 0.03 - uBoilWobble + 41.0)) - 0.5;
-  vec2 uv = vUv + wob * 2.0 * uWobble * uPx * texel;
-
-  // Colour, bleeding a little past its edges.
-  vec3 base = colAt(uv);
-  vec2 bleed = (vec2(noise(css * 0.09 + 3.0), noise(css * 0.09 + 17.0)) - 0.5) * 5.0 * uPx * texel;
-  base = mix(base, colAt(uv + bleed), 0.45);
-
-  // Edges from colour and depth, with a crayon-width kernel.
-  vec2 k = 1.6 * uPx * texel;
-  vec3 c00 = colAt(uv + k * vec2(-1.0, -1.0)); vec3 c10 = colAt(uv + k * vec2(0.0, -1.0)); vec3 c20 = colAt(uv + k * vec2(1.0, -1.0));
-  vec3 c01 = colAt(uv + k * vec2(-1.0, 0.0));                                              vec3 c21 = colAt(uv + k * vec2(1.0, 0.0));
-  vec3 c02 = colAt(uv + k * vec2(-1.0, 1.0));  vec3 c12 = colAt(uv + k * vec2(0.0, 1.0));  vec3 c22 = colAt(uv + k * vec2(1.0, 1.0));
-  vec3 gxc = (c20 + 2.0 * c21 + c22) - (c00 + 2.0 * c01 + c02);
-  vec3 gyc = (c02 + 2.0 * c12 + c22) - (c00 + 2.0 * c10 + c20);
-  float colEdge = length(vec2(length(gxc), length(gyc)));
-  float dc = invDepthAt(uv);
-  float lap = abs(invDepthAt(uv + k * vec2(-1.0, 0.0)) + invDepthAt(uv + k * vec2(1.0, 0.0)) + invDepthAt(uv + k * vec2(0.0, -1.0)) + invDepthAt(uv + k * vec2(0.0, 1.0)) - 4.0 * dc);
-  #ifdef LITE
-  float depthEdge = lap / dc;
-  #else
-  float lapX = abs(invDepthAt(uv + k * vec2(-1.0, -1.0)) + invDepthAt(uv + k * vec2(1.0, 1.0)) + invDepthAt(uv + k * vec2(1.0, -1.0)) + invDepthAt(uv + k * vec2(-1.0, 1.0)) - 4.0 * dc);
-  float depthEdge = max(lap, lapX * 0.5) / dc;
-  #endif
-  float edge = max(smoothstep(0.32, 0.75, colEdge), smoothstep(0.08, 0.22, depthEdge));
-
-  // Posterise luminance, keep the hue, push the saturation a bit.
-  float L = luma(base);
-  // Soften the steps a little, so smooth gradients don't turn into contour maps.
-  float Lq = mix(softSteps(L + 0.1, 5.0) - 0.1, L, 0.35);
-  vec3 wax = clamp(base * (Lq + 0.06) / (L + 0.06), 0.0, 1.0);
-  wax = clamp(mix(vec3(luma(wax)), wax, 1.3), 0.0, 1.0);
-
-  // Strokes follow edges where there is a gradient, otherwise run diagonally.
-  // The two patterns are blended, not the angle, so a moving edge doesn't
-  // spin the strokes around it.
-  vec2 g = vec2(luma(gxc), luma(gyc));
-  float along = atan(g.y, g.x) + 1.5708;
-  float follow = smoothstep(0.12, 0.4, length(g));
-
-  // ...drawn on the surfaces. The surface's normal comes from how its world
-  // position changes across the screen; it picks the plane(s) to project on.
-  vec3 wp = worldAt(uv);
-  vec3 dx = dFdx(wp);
-  vec3 dy = dFdy(wp);
-  vec3 n = abs(normalize(cross(dx, dy) + 1e-9));
-  // How much surface a CSS pixel covers here, and the two scales around it.
-  // Head-on that's set by the distance; on surfaces seen at a grazing angle
-  // (the ground, the sides of things) a pixel spans far more along the view,
-  // so the scale follows the pixel's longer side to keep strokes from
-  // aliasing into moire rings. Clamped, because across a silhouette the
-  // derivatives jump between surfaces.
-  float headOn = uTanHalf * 2.0 * uPx / (uRes.y * dc);
-  float cssWorld = clamp(max(length(dx), length(dy)) * uPx, headOn, headOn * 8.0);
-  float level = log2(max(cssWorld, 1e-6));
-  float scale0 = exp2(floor(level));
-  float fade = level - floor(level);
-  // The cross-hatch only darkens below this lightness (see "Cross-hatch the darks").
-  bool hatch = Lq < 0.45;
-  vec2 m;
-  #ifdef LITE
-  // Phones: only the plane the surface faces most.
-  bool onX = n.x >= n.y && n.x >= n.z;
-  bool onY = !onX && n.y >= n.z;
-  vec2 plane = onX ? wp.zy : onY ? wp.xz + 17.0 : wp.xy + 31.0;
-  m = marksOn(plane, onX ? 0.75 : onY ? 0.45 : 1.05, scale0, fade, along, follow, hatch);
-  #else
-  vec3 w = n * n * n * n;
-  w /= w.x + w.y + w.z;
-  w *= step(0.02, w);
-  m = vec2(0.0);
-  if (w.x > 0.0) m += w.x * marksOn(wp.zy, 0.75, scale0, fade, along, follow, hatch);
-  if (w.y > 0.0) m += w.y * marksOn(wp.xz + 17.0, 0.45, scale0, fade, along, follow, hatch);
-  if (w.z > 0.0) m += w.z * marksOn(wp.xy + 31.0, 1.05, scale0, fade, along, follow, hatch);
-  m /= w.x + w.y + w.z;
-  #endif
-  float s = m.x;
-
-  // Paper grain: crayon catches the tops of the tooth, misses the valleys.
-  float grain = 0.55 * noise(tilt(css, 0.61) * band(0.75)) + 0.33 * noise(tilt(css, 1.13) * band(1.9) + 13.0) + 0.12 * noise(tilt(css, 2.29) * 0.2 + 5.0);
-  float pressure = clamp(1.05 - Lq * 0.55, 0.25, 1.0);
-  float cover = smoothstep(-0.06, 0.4, pressure * (0.5 + 0.7 * s) - grain * 0.6);
-  vec3 col = mix(uPaper, wax * (0.9 + 0.2 * s), cover);
-
-  // Cross-hatch the darks.
-  float s2 = m.y;
-  float dark = smoothstep(0.45, 0.1, Lq) * smoothstep(0.45, 0.8, s2) * smoothstep(0.2, 0.7, grain + 0.3);
-  col = mix(col, col * 0.62, dark);
-
-  // Light sources: a hatched halo around them, and no ink where they shine.
-  float glow = glowAt(uv);
-  float halo = 0.0;
-  for (int i = 0; i < 8; i++) {
-    vec2 d = vec2(cos(float(i) * 0.785398 + 0.3), sin(float(i) * 0.785398 + 0.3)) * uPx * texel;
-    #ifdef LITE
-    halo += 1.5 * glowAt(uv + d * 4.5);
-    #else
-    halo += glowAt(uv + d * 3.5) + 0.5 * glowAt(uv + d * 7.5);
-    #endif
-  }
-  halo = clamp(halo / 9.0, 0.0, 1.0) * (1.0 - glow);
-  col = mix(col, uHalo, smoothstep(0.1, 0.8, halo) * (0.25 + 0.45 * s));
-  edge *= 1.0 - max(glow, smoothstep(0.15, 0.5, halo));
-
-  // Wobbly ink outline, broken where the wax skips.
-  float skip = smoothstep(0.15, 0.6, noise(tilt(css, 0.37) * vec2(band(0.6), band(0.9)) + 5.0) * 0.7 + grain * 0.6);
-  col = mix(col, uInk, edge * skip * 0.92);
-
-  // The light itself: solid wax, warmed toward white, no paper showing through.
-  vec3 lit = mix(base, vec3(1.0, 0.98, 0.9), 0.3) * (0.95 + 0.08 * s);
-  col = mix(col, lit, glow);
-
-  gl_FragColor = vec4(col, 1.0);
+const fragmentMain = /* glsl */ `
+{
+  // Wax in the material's colour, pressed a little unevenly; paper (a pale
+  // tint of the colour, lit like the surface) where the strokes leave gaps.
+  vec3 cn = vCrayonNormal;
+  float wax = crayonWax(vCrayonPos, length(cn) > 0.0 ? normalize(cn) : vec3(0.0, 0.0, 1.0));
+  float covered = smoothstep(0.2, 0.55, wax);
+  // Dark colours (the marquee's backing, eyes, tyres) stay dark: the paper barely shows through them.
+  float tone = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+  vec3 paper = mix(diffuseColor.rgb, uCrayonPaper, mix(0.1, 0.6, smoothstep(0.01, 0.12, tone)));
+  diffuseColor.rgb = mix(paper, diffuseColor.rgb * (0.82 + 0.3 * wax), covered);
 }
 `;
 
 /**
- * The full-screen crayon pass. Call `setSize` with the render target's size in
- * device pixels and the device pixel ratio, `setCamera` with the scene's
- * camera before each frame (to find the surfaces from depth), and `setBoil`
- * with the clock.
- * `lite` compiles a cheaper variant for phones and software renderers: one
- * halo ring and a four-neighbour depth edge, about a third fewer texture reads.
- * @param {{ color: import('three').Texture, depth: import('three').Texture, near: number, far: number, lite?: boolean }} input
+ * Crayon for one scene: the stroke texture, the patch that puts it on
+ * materials, the outlines, and the boil they share. Call `setSize` with the
+ * canvas size in device pixels and the device pixel ratio, `setBoil` with the
+ * clock, and `apply` once on the built scene.
+ * @param {{ lite?: boolean, anisotropy?: number }} [options]
  */
-export function createCrayonPass({ color, depth, near, far, lite = false }) {
-  const material = new ShaderMaterial({
-    defines: lite ? { LITE: 1 } : {},
-    vertexShader,
-    fragmentShader,
-    depthTest: false,
-    depthWrite: false,
-    uniforms: {
-      tColor: { value: color },
-      tDepth: { value: depth },
-      uRes: { value: new Vector2(1, 1) },
-      uPx: { value: 1 },
-      uWobble: { value: WOBBLE_PX },
-      uInvViewProj: { value: new Matrix4() },
-      uTanHalf: { value: Math.tan((28 * Math.PI) / 180) },
-      uBoilStrokes: { value: new Vector2() },
-      uBoilWobble: { value: new Vector2() },
-      uNear: { value: near },
-      uFar: { value: far },
-      uPaper: { value: srgb(PAPER) },
-      uInk: { value: srgb(INK) },
-      uHalo: { value: srgb('#FFB02E') },
-    },
+export function createCrayon({ lite = false, anisotropy = 1 } = {}) {
+  const map = crayonMap(anisotropy);
+  const shared = {
+    tCrayon: { value: map },
+    uCrayonVariant: { value: new Vector4(1, 0, 0, 0) },
+    uCrayonPaper: { value: new Color(PAPER) },
+  };
+  const outline = new ShaderMaterial({
+    name: 'crayon-outline',
+    side: BackSide,
+    fog: true,
+    uniforms: UniformsUtils.merge([
+      UniformsLib.fog,
+      {
+        uInk: { value: new Color(INK) },
+        uWidth: { value: OUTLINE_PX },
+        uRes: { value: new Vector2(1, 1) },
+        uSeed: { value: 0 },
+      },
+    ]),
+    vertexShader: /* glsl */ `
+      #include <common>
+      #include <fog_pars_vertex>
+      uniform vec2 uRes;
+      uniform float uWidth;
+      uniform float uSeed;
+      float jitter(vec3 p) { return fract(sin(dot(floor(p * 5.0) + uSeed * 7.13, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+      void main() {
+        vec4 local = vec4(position, 1.0);
+        vec3 n = normal;
+        #ifdef USE_INSTANCING
+          local = instanceMatrix * local;
+          n = mat3(instanceMatrix) * n;
+        #endif
+        vec4 mvPosition = modelViewMatrix * local;
+        vec4 clip = projectionMatrix * mvPosition;
+        // Out along the normal as seen on screen, by a constant width that wavers a little.
+        vec2 dir = (projectionMatrix * vec4(normalize(mat3(modelViewMatrix) * n), 0.0)).xy;
+        float len = length(dir);
+        dir = len > 1e-5 ? dir / len : vec2(0.0);
+        clip.xy += dir * uWidth * (0.7 + 0.6 * jitter(position)) * 2.0 / uRes * clip.w;
+        gl_Position = clip;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: /* glsl */ `
+      #include <common>
+      #include <fog_pars_fragment>
+      uniform vec3 uInk;
+      void main() {
+        gl_FragColor = vec4(uInk, 1.0);
+        #include <colorspace_fragment>
+        #include <fog_fragment>
+      }`,
   });
-  const scene = new Scene();
-  const quad = new Mesh(new PlaneGeometry(2, 2), material);
-  quad.frustumCulled = false;
-  scene.add(quad);
-  const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+  /** @param {import('three').Material} material */
+  function crayonize(material) {
+    if (material.userData.crayon) return;
+    material.userData.crayon = true;
+    material.defines = { ...material.defines, ...(lite ? { CRAYON_LITE: 1 } : {}) };
+    material.onBeforeCompile = (shader) => {
+      Object.assign(shader.uniforms, shared);
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${vertexPars}`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>\n${vertexMain}`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${fragmentPars}`)
+        .replace('#include <color_fragment>', `#include <color_fragment>\n${fragmentMain}`);
+    };
+    // One compiled program per variant of the patch, not per material.
+    material.customProgramCacheKey = () => (lite ? 'crayon-lite' : 'crayon');
+    material.needsUpdate = true;
+  }
+
+  /**
+   * Colours in every opaque Lambert and basic material under root, and gives
+   * the solids that asked for one (userData.hull, or userData.outline on their
+   * own geometry) an ink outline. Solids that never move (userData.still)
+   * share one outline, merged in world space: one draw call for all of them.
+   * @param {import('three').Object3D} root
+   */
+  function apply(root) {
+    /** @type {Mesh[]} */
+    const outlined = [];
+    root.traverse((object) => {
+      const mesh = /** @type {Mesh} */ (object);
+      if (!mesh.isMesh) return;
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const opaque = !m.transparent && m.blending === NormalBlending;
+        if (opaque && (m instanceof MeshLambertMaterial || m instanceof MeshBasicMaterial)) crayonize(m);
+      }
+      if (mesh.userData.hull || mesh.userData.outline) outlined.push(mesh);
+    });
+    root.updateMatrixWorld(true);
+    /** @type {BufferGeometry[]} */
+    const still = [];
+    for (const mesh of outlined) {
+      if (mesh.userData.still && !(mesh instanceof InstancedMesh)) {
+        still.push((mesh.userData.hull ?? hullGeometry(mesh.geometry)).clone().applyMatrix4(mesh.matrixWorld));
+        continue;
+      }
+      const geometry = mesh.userData.hull ?? hullGeometry(mesh.geometry);
+      /** @type {Mesh} */
+      let hull;
+      if (mesh instanceof InstancedMesh) {
+        const inst = new InstancedMesh(geometry, outline, mesh.count);
+        inst.instanceMatrix = mesh.instanceMatrix;
+        inst.onBeforeRender = () => (inst.count = mesh.count);
+        hull = inst;
+      } else {
+        hull = new Mesh(geometry, outline);
+      }
+      hull.name = 'outline';
+      hull.frustumCulled = mesh.frustumCulled;
+      hull.renderOrder = mesh.renderOrder;
+      mesh.add(hull);
+    }
+    if (still.length) {
+      const hull = new Mesh(mergeGeometries(still), outline);
+      hull.name = 'outline';
+      hull.userData.still = true;
+      still.forEach((g) => g.dispose());
+      root.add(hull);
+    }
+    return outlined.length;
+  }
 
   return {
-    scene,
-    camera,
-    material,
+    map,
+    outline,
+    crayonize,
+    apply,
     /** @param {number} width @param {number} height @param {number} px */
     setSize(width, height, px) {
-      material.uniforms.uRes.value.set(width, height);
-      material.uniforms.uPx.value = px;
-    },
-    /** @param {import('three').PerspectiveCamera} camera */
-    setCamera(camera) {
-      material.uniforms.uInvViewProj.value.multiplyMatrices(camera.matrixWorld, camera.projectionMatrixInverse);
-      material.uniforms.uTanHalf.value = Math.tan((camera.fov * Math.PI) / 360);
+      outline.uniforms.uRes.value.set(width, height);
+      outline.uniforms.uWidth.value = OUTLINE_PX * px;
     },
     /** @param {number} seconds */
     setBoil(seconds) {
-      const v = VARIANTS[boilStep(seconds)];
-      material.uniforms.uBoilStrokes.value.fromArray(v.strokes);
-      material.uniforms.uBoilWobble.value.fromArray(v.wobble);
+      const k = boilStep(seconds);
+      shared.uCrayonVariant.value.set(k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0, k === 3 ? 1 : 0);
+      outline.uniforms.uSeed.value = k;
     },
     dispose() {
-      quad.geometry.dispose();
-      material.dispose();
+      map.dispose();
+      outline.dispose();
     },
   };
 }
 
-/** A palette colour as raw sRGB components, since the shader writes sRGB directly. */
-function srgb(/** @type {string} */ hex) {
-  const c = new Color();
-  c.setHex(parseInt(hex.slice(1), 16), 'srgb-linear');
-  return c;
+/**
+ * An outline hull for a solid: its shape with the faces' corners welded, so
+ * the normals are smoothed and the pushed-out back faces close up at the edges.
+ * @param {BufferGeometry} geometry
+ */
+export function hullGeometry(geometry) {
+  const shape = new BufferGeometry();
+  shape.setAttribute(
+    'position',
+    /** @type {import('three').BufferAttribute} */ (geometry.getAttribute('position')).clone(),
+  );
+  if (geometry.index) shape.setIndex(geometry.index.clone());
+  const welded = mergeVertices(shape, 1e-4);
+  shape.dispose();
+  welded.computeVertexNormals();
+  return welded;
 }

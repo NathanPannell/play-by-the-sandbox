@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { PAPERS, seamScore } from '../tools/seams.mjs';
 
 /** @param {import('@playwright/test').Page} page */
 const frames = (page) =>
@@ -148,19 +147,4 @@ test('a speech bubble points at the marquee while it is in view', async ({ page 
   const size = page.viewportSize();
   expect(box?.x).toBeGreaterThanOrEqual(0);
   expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size?.width ?? 0);
-});
-
-test('graphics QA: the crayon paper has no tiling seams', async ({ page }) => {
-  // The pass alone over flat colours, high-passed, checked for repeats at
-  // shifts of 8 to 128 pixels. The old float-hash grain repeated every few
-  // dozen pixels and scored 0.2 to 0.45 here; random grain stays near 0.02.
-  test.setTimeout(90_000);
-  // The full tier, so CI's software renderer still draws at the device's own
-  // pixel ratio (1 on desktop, 1.5 on the phone profile).
-  await page.goto('/?hero-debug&hero-tier=full');
-  await expect(page.locator('#heroScene')).toHaveClass(/ready/);
-  for (const [name, rgb] of Object.entries(PAPERS)) {
-    const { score, lag } = await seamScore(page, rgb);
-    expect(score, `${name} paper repeats every ${lag}px`).toBeLessThan(0.1);
-  }
 });

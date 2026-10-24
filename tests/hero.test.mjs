@@ -1,17 +1,15 @@
-import {
-  Color,
-  DataTexture,
-  InstancedMesh,
-  Matrix4,
-  Mesh,
-  OneFactor,
-  PerspectiveCamera,
-  Texture,
-  Vector3,
-  ZeroFactor,
-} from 'three';
+import { BoxGeometry, Color, InstancedMesh, Mesh, Shape, ShapeGeometry, Texture, Vector2, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
-import { BOIL_FPS, BOIL_VARIANTS, VARIANTS, WOBBLE_PX, boilStep, createCrayonPass } from '../src/hero/crayon.js';
+import {
+  BOIL_FPS,
+  BOIL_VARIANTS,
+  OUTLINE_PX,
+  TEXTURE_SIZE,
+  boilStep,
+  createCrayon,
+  crayonTexture,
+  hullGeometry,
+} from '../src/hero/crayon.js';
 import { bulbLayout } from '../src/hero/marquee.js';
 import {
   MAX_DPR,
@@ -23,7 +21,7 @@ import {
   pickQuality,
   rng,
 } from '../src/hero/quality.js';
-import { EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
+import { Batch, EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
 const phone = pickQuality({ width: 390, devicePixelRatio: 3, coarsePointer: true });
@@ -288,9 +286,7 @@ describe('scene', () => {
     const chasers = /** @type {InstancedMesh} */ (world.scene.getObjectByName('marquee-chasers'));
     expect(letters.count).toBe(bulbLayout('SANDBOX').length);
     for (const mesh of [letters, bulbs, chasers]) {
-      expect(/** @type {import('three').ShaderMaterial} */ (mesh.material).fragmentShader).toContain(
-        'vec4(vColor, 0.0)',
-      );
+      expect(/** @type {import('three').ShaderMaterial} */ (mesh.material).userData.glow).toBe(true);
     }
     const colours = (/** @type {InstancedMesh} */ mesh) => Array.from(mesh.instanceColor?.array ?? []);
     world.update(1);
@@ -306,25 +302,19 @@ describe('scene', () => {
     for (let i = 0; i < letters.count; i++) expect(letters.getColorAt(i, yellow).getHexString()).toBe('ffc93a');
   });
 
-  it('marks glowing pixels with zero alpha for the crayon pass, and nothing else', () => {
+  it('draws light sources in full colour, warmed toward white, straight to the screen', () => {
     const glow = glowMaterial();
     expect(glow.userData.glow).toBe(true);
-    expect(glow.fragmentShader).toMatch(/gl_FragColor\s*=\s*vec4\(\s*vColor\s*,\s*0\.0\s*\)/);
+    expect(glow.fragmentShader).toMatch(/mix\(vColor, vec3\(1\.0, 0\.98, 0\.9\), 0\.3\)/);
+    // Custom shaders convert to the screen's colour space themselves.
+    expect(glow.fragmentShader).toContain('#include <colorspace_fragment>');
     // Instancing is optional, so the material also works on a plain mesh.
     expect(glow.vertexShader).toMatch(/#ifdef USE_INSTANCING/);
-
-    // Every other material must leave alpha at 1: opaque, or additive light
-    // that keeps the destination alpha.
     for (const quality of [desktop, phone]) {
       buildScene(quality).scene.traverse((o) => {
-        const material = /** @type {import('three').Material | undefined} */ (/** @type {Mesh} */ (o).material);
-        if (!material || material.userData.glow) return;
-        expect(
-          material.opacity === 1 || (material.blendSrcAlpha === ZeroFactor && material.blendDstAlpha === OneFactor),
-          o.type,
-        ).toBe(true);
-        if (material.transparent)
-          expect([material.blendSrcAlpha, material.blendDstAlpha]).toEqual([ZeroFactor, OneFactor]);
+        const material = /** @type {import('three').ShaderMaterial | undefined} */ (/** @type {Mesh} */ (o).material);
+        if (material?.isShaderMaterial)
+          expect(material.fragmentShader, o.name).toContain('#include <colorspace_fragment>');
       });
     }
   });
@@ -374,113 +364,157 @@ describe('scene', () => {
   });
 });
 
-describe('crayon pass', () => {
-  const pass = createCrayonPass({ color: new DataTexture(), depth: new DataTexture(), near: 0.5, far: 260 });
+describe('crayon on the models', () => {
+  const crayon = createCrayon();
 
-  it('draws a full-screen quad with the crayon shader', () => {
-    const uniforms = pass.material.uniforms;
-    expect(pass.scene.children).toHaveLength(1);
-    expect(pass.material.fragmentShader).toContain('tDepth');
-    // Light sources keep their colour and get a halo instead of ink.
-    expect(pass.material.fragmentShader).toContain('glowAt');
-    expect(uniforms.uHalo.value.getHexString('srgb-linear')).toBe('ffb02e');
-    expect(pass.material.depthTest).toBe(false);
-    expect(uniforms.uNear.value).toBe(0.5);
-    expect(uniforms.uFar.value).toBe(260);
-    // Palette colours go in as raw sRGB, since the shader writes sRGB.
-    expect(uniforms.uInk.value.getHexString('srgb-linear')).toBe('17151a');
-    expect(uniforms.uPaper.value.getHexString('srgb-linear')).toBe('fffcf5');
+  it('draws its strokes in a small tileable texture, four redrawn versions in its channels', () => {
+    const data = crayonTexture(64, 5);
+    expect(data).toHaveLength(64 * 64 * 4);
+    expect(TEXTURE_SIZE).toBeLessThanOrEqual(256);
+    for (let k = 0; k < 4; k++) {
+      let wax = 0;
+      let paper = 0;
+      for (let i = k; i < data.length; i += 4) {
+        if (data[i] > 110) wax++;
+        if (data[i] < 40) paper++;
+      }
+      const n = data.length / 4;
+      // Mostly wax, with paper showing in the gaps.
+      expect(wax / n, `wax in variant ${k}`).toBeGreaterThan(0.4);
+      expect(paper / n, `paper in variant ${k}`).toBeGreaterThan(0.05);
+    }
+    // The variants are the same strokes, redrawn: close, but not the same.
+    let same = 0;
+    let near = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] === data[i + 1]) same++;
+      if (Math.abs(data[i] - data[i + 1]) < 64) near++;
+    }
+    expect(same / (data.length / 4)).toBeLessThan(0.9);
+    expect(near / (data.length / 4)).toBeGreaterThan(0.6);
+    // It tiles: across the wrap, neighbouring texels differ no more than they do inside.
+    const at = (/** @type {number} */ x, /** @type {number} */ y) => data[(y * 64 + x) * 4];
+    let edge = 0;
+    let inside = 0;
+    for (let y = 0; y < 64; y++) {
+      edge += Math.abs(at(63, y) - at(0, y)) + Math.abs(at(y, 63) - at(y, 0));
+      inside += Math.abs(at(31, y) - at(32, y)) + Math.abs(at(y, 31) - at(y, 32));
+    }
+    expect(edge).toBeLessThan(inside * 1.6);
+    // Repeatable: the same seed draws the same strokes.
+    expect(crayonTexture(64, 5)).toEqual(data);
   });
 
-  it('sizes to the target in device pixels', () => {
-    pass.setSize(1920, 1080, 1.5);
-    expect(pass.material.uniforms.uRes.value.toArray()).toEqual([1920, 1080]);
-    expect(pass.material.uniforms.uPx.value).toBe(1.5);
+  it('is a repeating, mipmapped, anisotropic texture, so it neither tiles at the edges nor shimmers', () => {
+    const { map } = createCrayon({ anisotropy: 8 });
+    expect(map.generateMipmaps).toBe(true);
+    expect(map.anisotropy).toBe(8);
+    expect(map.image.width).toBe(TEXTURE_SIZE);
+  });
+
+  it('colours in every opaque lit and unlit material, on its own surface, and leaves light sources alone', () => {
+    for (const quality of [desktop, phone]) {
+      const world = buildScene(quality);
+      const kit = createCrayon({ lite: quality.lite });
+      const outlined = kit.apply(world.scene);
+      expect(outlined).toBeGreaterThan(10);
+      /** @type {Set<import('three').Material>} */
+      const coloured = new Set();
+      world.scene.traverse((o) => {
+        const mesh = /** @type {Mesh} */ (o);
+        if (!mesh.isMesh) return;
+        const material = /** @type {import('three').Material} */ (mesh.material);
+        if (material.userData.crayon) coloured.add(material);
+        if (material.userData.glow) expect(material.userData.crayon).toBeUndefined();
+        if (material.transparent) expect(material.userData.crayon).toBeUndefined();
+      });
+      expect(coloured.size).toBeGreaterThan(5);
+      // The patch: strokes sampled in object space, in the material's own colour, before lighting.
+      const shader = {
+        uniforms: {},
+        vertexShader: '#include <common>\n#include <begin_vertex>',
+        fragmentShader: '#include <common>\n#include <color_fragment>',
+      };
+      const material = [...coloured][0];
+      material.onBeforeCompile(/** @type {any} */ (shader), /** @type {any} */ (null));
+      expect(shader.vertexShader).toContain('vCrayonPos = position;');
+      expect(shader.fragmentShader).toMatch(/#include <color_fragment>\n[\s\S]*diffuseColor\.rgb = mix\(paper/);
+      expect(Object.keys(shader.uniforms)).toEqual(['tCrayon', 'uCrayonVariant', 'uCrayonPaper']);
+      expect(Boolean(material.defines?.CRAYON_LITE)).toBe(quality.lite);
+      // Every crayon material shares one compiled program per tier.
+      expect(material.customProgramCacheKey()).toBe(quality.lite ? 'crayon-lite' : 'crayon');
+      kit.dispose();
+    }
+  });
+
+  it('outlines the solids with an ink hull that follows instanced crowds', () => {
+    const world = buildScene(desktop);
+    const kit = createCrayon();
+    kit.apply(world.scene);
+    /** @type {Mesh[]} */
+    const hulls = [];
+    world.scene.traverse((o) => o.name === 'outline' && hulls.push(/** @type {Mesh} */ (o)));
+    expect(hulls.length).toBeGreaterThan(10);
+    for (const hull of hulls) {
+      expect(hull.material).toBe(kit.outline);
+      if (/** @type {InstancedMesh} */ (hull.parent).isInstancedMesh) {
+        // The hull draws as many instances as its crowd does.
+        const crowd = /** @type {InstancedMesh} */ (hull.parent);
+        crowd.count = Math.max(1, crowd.count - 1);
+        hull.onBeforeRender(
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+        );
+        expect(/** @type {InstancedMesh} */ (hull).count).toBe(crowd.count);
+      }
+      if (/** @type {InstancedMesh} */ (hull.parent).isInstancedMesh)
+        expect(/** @type {InstancedMesh} */ (hull).instanceMatrix).toBe(
+          /** @type {InstancedMesh} */ (hull.parent).instanceMatrix,
+        );
+    }
+    // Back faces, pushed out by a constant width on screen, faded by the fog.
+    expect(kit.outline.side).toBe(1);
+    expect(kit.outline.fog).toBe(true);
+    kit.setSize(1920, 1080, 1.5);
+    expect(kit.outline.uniforms.uRes.value.toArray()).toEqual([1920, 1080]);
+    expect(kit.outline.uniforms.uWidth.value).toBeCloseTo(OUTLINE_PX * 1.5);
+    // A box's hull is welded at the corners, so pushing it out along the normals closes it up.
+    expect(hullGeometry(new BoxGeometry(1, 1, 1)).getAttribute('position').count).toBe(8);
+    // Flat shapes (bunting, stars) have no inside, so they're left out of the hulls.
+    const triangle = () => new ShapeGeometry(new Shape([new Vector2(0, 0), new Vector2(1, 0), new Vector2(0.5, 1)]));
+    const flat = new Batch();
+    flat.add(triangle(), '#FF0000');
+    expect(flat.mesh().userData.hull).toBeUndefined();
+    const mixed = new Batch();
+    mixed.add(triangle(), '#FF0000');
+    mixed.box(1, 1, 1, '#00FF00', 0, 0, 0);
+    expect(mixed.mesh().userData.hull.getAttribute('position').count).toBe(8);
+    kit.dispose();
   });
 
   it('boils like hand-drawn animation: a few drawings, stepped a few times a second', () => {
-    // A deliberate low-rate step (on threes to fives), never a per-frame reseed.
     expect(BOIL_FPS).toBeGreaterThanOrEqual(3);
     expect(BOIL_FPS).toBeLessThanOrEqual(8);
-    expect(VARIANTS).toHaveLength(BOIL_VARIANTS);
-    expect(BOIL_VARIANTS).toBeGreaterThanOrEqual(3);
-    // It holds for a whole step, then moves to the next drawing, and cycles.
+    expect(BOIL_VARIANTS).toBe(4);
     const step = 1 / BOIL_FPS;
     for (const t of [0, 1.2, 37, 600]) {
       const at = Math.floor(t * BOIL_FPS) * step;
       expect(boilStep(at + step * 0.1)).toBe(boilStep(at + step * 0.9));
       expect(boilStep(at + step * 1.1)).toBe((boilStep(at + step * 0.5) + 1) % BOIL_VARIANTS);
     }
-    expect(boilStep(BOIL_VARIANTS * step + step / 2)).toBe(boilStep(step / 2));
     expect(boilStep(-step / 2)).toBe(BOIL_VARIANTS - 1);
-    // Each drawing is the same one nudged a little: strokes by under two of
-    // their units (CSS pixels), the outline wobble by under a noise cell.
-    for (const v of VARIANTS) {
-      expect(Math.hypot(...v.strokes)).toBeLessThan(2);
-      expect(Math.hypot(...v.wobble)).toBeLessThan(1);
+    // One texture channel and one outline seed per step, for every material at once.
+    for (let k = 0; k < BOIL_VARIANTS; k++) {
+      crayon.setBoil(k * step + step / 2);
+      expect(crayon.outline.uniforms.uSeed.value).toBe(k);
     }
-    const uniforms = pass.material.uniforms;
-    for (let i = 0; i < BOIL_VARIANTS; i++) {
-      pass.setBoil(i * step + step / 2);
-      expect(uniforms.uBoilStrokes.value.toArray()).toEqual(VARIANTS[i].strokes);
-      expect(uniforms.uBoilWobble.value.toArray()).toEqual(VARIANTS[i].wobble);
-    }
-    expect(uniforms.uWobble.value).toBe(WOBBLE_PX);
-    expect(WOBBLE_PX).toBeLessThanOrEqual(2.5);
-  });
-
-  it('finds the surfaces from depth, so the strokes stay on them as the camera turns', () => {
-    const camera = new PerspectiveCamera(60, 16 / 9, 0.4, 260);
-    camera.position.set(3, 1.6, -2);
-    camera.rotation.set(0.1, 0.7, 0);
-    camera.updateMatrixWorld();
-    pass.setCamera(camera);
-    const uniforms = pass.material.uniforms;
-    // The inverse of projection x view: a point projected and brought back lands where it was.
-    const viewProj = new Matrix4().multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
-    const p = new Vector3(4, 2, -12);
-    const back = p.clone().applyMatrix4(viewProj).applyMatrix4(uniforms.uInvViewProj.value);
-    expect(back.distanceTo(p)).toBeLessThan(1e-3);
-    expect(uniforms.uTanHalf.value).toBeCloseTo(Math.tan(Math.PI / 6), 6);
-    const shader = pass.material.fragmentShader;
-    expect(shader).toContain('vec3 worldAt(vec2 uv)');
-    // Triplanar on the surface's own normal, at two world-fixed scales cross-faded by distance.
-    expect(shader).toContain('vec3 dx = dFdx(wp);');
-    expect(shader).toContain('cross(dx, dy)');
-    // The scale follows the pixel's footprint on the surface, so grazing surfaces don't alias.
-    expect(shader).toContain('max(length(dx), length(dy))');
-    expect(shader).toMatch(/exp2\(floor\(level\)\)/);
-    expect(shader).toContain('marksOn(wp.zy');
-    // A scale is drawn the same whether it's the finer or the coarser of the pair, so there's no seam where they swap.
-    expect(shader).toContain('marks(p / scale0,');
-    expect(shader).toContain('marks(p / (scale0 * 2.0),');
-    // The strokes don't read the screen position any more; only the paper, wobble and bleed do.
-    expect(shader).not.toMatch(/strokes\(css/);
-  });
-
-  it('has a lighter variant for phones and software renderers', () => {
-    const lite = createCrayonPass({
-      color: new DataTexture(),
-      depth: new DataTexture(),
-      near: 0.5,
-      far: 260,
-      lite: true,
-    });
-    expect(lite.material.defines).toEqual({ LITE: 1 });
-    expect(pass.material.defines).toEqual({});
-    expect(lite.material.fragmentShader).toContain('#ifdef LITE');
-    lite.dispose();
-  });
-
-  it('keeps its grain finer than the pixels can show from aliasing into seams', () => {
-    const shader = pass.material.fragmentShader;
-    // An integer hash (no float-precision lattice), band-limited and tilted noise.
-    expect(shader).toContain('uint pcg(uint v)');
-    expect(shader).toMatch(/float band\(float cellsPerCss\) \{ return min\(cellsPerCss, 0\.45 \* uPx\); \}/);
-    expect(shader).toMatch(/noise\(tilt\(css, [\d.]+\) \* band\(1\.9\)/);
   });
 
   it('cleans up', () => {
-    pass.dispose();
+    crayon.dispose();
   });
 });
