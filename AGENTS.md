@@ -78,12 +78,12 @@ html-validate turns off three stylistic rules (`attr-quotes`, `doctype-style`, `
 The hero is a fullscreen 360° scene (`100dvh`, with `100svh` and `100vh` fallbacks). The page sections follow below it. The scene itself is sized to the large viewport (`100lvh`), so a phone's address bar coming and going never resizes the canvas. Everything else sits on top of it as small paper inlays (`.hud`):
 
 - top left: the "Play by the" ribbon and the wordmark (the page's `h1`), with "January 2027 · Vancouver Art Gallery";
-- top right: nav chips with letter shortcuts (H, R, T, W) and a yellow Apply chip (A). On phones the links fold into a Menu chip, and Apply stays out. Shortcuts are ignored while typing in a field or with a modifier held;
-- bottom left: "I wanna play" and the pause/play control (P). The scene turns forever, so this is the WCAG 2.2.2 control. Under reduced motion the scene starts still and Play starts it;
+- top right: nav chips and a yellow Apply chip. On phones the links fold into a Menu chip (Escape closes it), and Apply stays out;
+- bottom left: "I wanna play" and the pause/play control. The scene turns forever, so this is the WCAG 2.2.2 control. Under reduced motion the scene starts still and Play starts it;
 - bottom right: a scroll cue (desktop);
 - in the scene: a speech bubble (`#heroCallout`) that `hero.js` keeps under the marquee's corner while the sign is in view.
 
-The shortcuts can be turned off from the footer ("Turn off keyboard shortcuts", remembered in `localStorage`), for WCAG 2.1.4. The pause control only shows once the scene is running. Every inlay control is at least 44px tall, and a light scrim at the top and bottom keeps the chips legible over any angle.
+There are no single-letter keyboard shortcuts (the owner had them removed on 2026-10-24); the chips and controls are ordinary links and buttons. The pause control only shows once the scene is running. Every inlay control is at least 44px tall, and a light scrim at the top and bottom keeps the chips legible over any angle.
 
 ## Hero scene
 

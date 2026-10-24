@@ -7,43 +7,41 @@ const frames = (page) =>
 /** @param {import('@playwright/test').Page} page */
 const isPhone = (page) => (page.viewportSize()?.width ?? 1000) <= 600;
 
-test('the nav chips carry letter shortcuts that jump to their sections', async ({ page }) => {
+test('the nav chips link to their sections', async ({ page }) => {
   await page.goto('/');
-  const chips = page.locator('.hud-nav a[data-key]');
+  const chips = page.locator('.hud-nav a.chip');
   await expect(chips).toHaveCount(5);
-  for (const [key, href] of [
-    ['H', '#how'],
-    ['R', '#map'],
-    ['T', '#toys'],
-    ['W', '#wishlist'],
-    ['A', '#toys'],
-  ]) {
-    const chip = page.locator(`.hud-nav a[data-key="${key.toLowerCase()}"]`);
-    await expect(chip).toHaveAttribute('href', href);
-    await expect(chip.locator('kbd')).toHaveText(key);
-  }
+  for (const [name, href] of [
+    ['how it goes', '#how'],
+    ['the runway', '#map'],
+    ['grab a toy', '#toys'],
+    ['wishlist', '#wishlist'],
+    ['Apply', '#toys'],
+  ])
+    await expect(page.locator('.hud-nav').getByRole('link', { name, includeHidden: true })).toHaveAttribute(
+      'href',
+      href,
+    );
   // Apply is the primary chip.
   await expect(page.locator('.hud-nav .chip-go')).toContainText('Apply');
-
-  await page.keyboard.press('w');
-  await expect(page).toHaveURL(/#wishlist$/);
-  await expect(page.locator('#wishlist')).toBeInViewport();
 });
 
-test('the shortcuts can be turned off, and stay off', async ({ page }) => {
+test('the site has no letter shortcuts: H, R, T, W, A and P do nothing', async ({ page }) => {
   await page.goto('/');
-  const off = page.locator('#kbdToggle');
-  await off.scrollIntoViewIfNeeded();
-  await expect(off).toHaveText('Turn off keyboard shortcuts');
-  await off.click();
-  await expect(off).toHaveText('Turn on keyboard shortcuts');
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.keyboard.press('w');
-  expect(new URL(page.url()).hash).toBe('');
-  await expect(page.locator('.hud-nav kbd').first()).toBeHidden();
-  await page.reload();
-  await page.keyboard.press('w');
-  expect(new URL(page.url()).hash).toBe('');
+  const scene = page.locator('#heroScene');
+  await expect(scene).toHaveAttribute('data-state', 'running');
+  // No key badges, no advertised shortcuts and no switch to turn them off.
+  await expect(page.locator('kbd, [data-key], [aria-keyshortcuts], #kbdToggle')).toHaveCount(0);
+  // After each key, give a late handler a moment, then check nothing moved:
+  // no jump to a section, no scroll, and the scene still turning (a P that
+  // paused and a Shift+P that resumed would otherwise cancel out).
+  for (const key of ['h', 'r', 't', 'w', 'a', 'p', 'Shift+H', 'Shift+P']) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(150);
+    expect(new URL(page.url()).hash).toBe('');
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    expect(await scene.getAttribute('data-state')).toBe('running');
+  }
 });
 
 test('odd keys do nothing and break nothing', async ({ page }) => {
@@ -53,22 +51,6 @@ test('odd keys do nothing and break nothing', async ({ page }) => {
   await page.goto('/');
   for (const key of ['"', '\\', 'Shift+Quote', 'x', '1']) await page.keyboard.press(key);
   expect(errors).toEqual([]);
-  expect(new URL(page.url()).hash).toBe('');
-});
-
-test('shortcuts stay out of the way while typing, or with a modifier held', async ({ page }) => {
-  await page.goto('/');
-  await page.evaluate(() => {
-    const input = document.createElement('input');
-    input.id = 'typing';
-    document.body.prepend(input);
-  });
-  await page.locator('#typing').focus();
-  await page.keyboard.type('what');
-  await expect(page.locator('#typing')).toHaveValue('what');
-  expect(new URL(page.url()).hash).toBe('');
-  await page.locator('#typing').blur();
-  await page.keyboard.press('Control+r').catch(() => {});
   expect(new URL(page.url()).hash).toBe('');
 });
 
@@ -116,9 +98,9 @@ test('the pause control stops and restarts the turning scene', async ({ page }) 
   await page.waitForTimeout(700);
   expect(await frames(page)).toBe(held);
 
-  // The P shortcut does the same.
-  await page.keyboard.press('p');
+  await toggle.click();
   await expect(scene).toHaveAttribute('data-state', 'running');
+  await expect(toggle).toHaveAccessibleName('Pause the scene');
   await expect.poll(() => frames(page), { timeout: 15000 }).toBeGreaterThan(held);
 });
 
