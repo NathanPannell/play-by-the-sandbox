@@ -144,8 +144,8 @@ const COLUMNS = [-8.4, -5, -1.7, 1.7, 5, 8.4];
 const COLUMN_Z = -2.4;
 /** Planters with palms at the corners of the carpet. */
 const PALMS = [
-  [-5.5, 3.75],
-  [5.5, 3.75],
+  [-4.9, 3.75],
+  [4.9, 3.75],
   [-5.5, KERB_Z - 1.2],
   [5.5, KERB_Z - 1.2],
 ];
@@ -1689,7 +1689,7 @@ function crowd(count, paparazzi, random, low = false) {
     ].some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.0); // shrubs and the arch's feet
 
   /** @param {number} x @param {number} z */
-  const crowded = (x, z) => folks.some((f) => Math.hypot(f.x - x, f.z - z) < 0.72);
+  const crowded = (x, z) => folks.some((f) => Math.hypot(f.x - x, f.z - z) < 0.8);
   /** A look for one person: build, hair and colouring vary, and a few are children. */
   const look = () => {
     const child = random() < 0.06;
@@ -1839,9 +1839,9 @@ function crowd(count, paparazzi, random, low = false) {
       built.set(f.w, f.h, f.w);
       body.setMatrixAt(i, m.compose(p.set(f.x, hop, f.z), q, built));
       head.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.47 * f.h, f.z), q, s));
-      // Short hair can be a fuller, rounder cut.
-      puff.copy(s).multiplyScalar(f.hair === 2 ? 1.1 : 1);
-      if (f.hair === 2) puff.y *= 1.12;
+      // Short hair can be a fuller, wider cut.
+      puff.copy(s);
+      if (f.hair === 2) puff.x = puff.z = s.x * 1.12;
       (f.hair === 1 ? hairLong : hairShort).setMatrixAt(hairSlot[i], m.compose(p, q, f.hair === 1 ? s : puff));
       // Arms from the shoulders: down, hands together in front, raised and
       // cheering, or up to the face holding a camera.
@@ -1943,7 +1943,7 @@ function figure(b, look) {
     b.pole(rHand, tip, 0.028, METAL, 6);
     b.pole(rHand.clone().lerp(tip, -0.12), rHand.clone().lerp(tip, 0.22), 0.045, PLUM, 8);
   }
-  // The phone: a pastel case with its screen toward the poser.
+  // The phone: a pastel case, its screen out toward the crowd.
   const phone = new Matrix4().lookAt(tip, new Vector3(0, 1.9, 2), new Vector3(0, 1, 0)).setPosition(tip);
   b.add(new BoxGeometry(0.21, 0.36, 0.05), look.case, phone);
   b.add(

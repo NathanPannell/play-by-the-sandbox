@@ -268,8 +268,8 @@ const fragmentMain = /* glsl */ `
 {
   // Soft grain in the surface's own colour: the strokes are a shade deeper
   // and a little richer than the flat colour, pressed unevenly, and where they
-  // leave gaps the colour itself shows. Nothing is lighter than the surface,
-  // so the strokes never read as pale streaks laid over it.
+  // leave gaps the colour itself shows (3% up, to keep the overall tone). No
+  // paper white, so the strokes never read as pale streaks laid over it.
   vec3 cn = vCrayonNormal;
   float wax = crayonWax(vCrayonPos, length(cn) > 0.0 ? normalize(cn) : vec3(0.0, 0.0, 1.0));
   float stroke = smoothstep(0.2, 0.6, wax) * clamp(wax, 0.0, 1.2);

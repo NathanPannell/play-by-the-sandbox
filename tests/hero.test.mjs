@@ -2,6 +2,7 @@ import {
   BoxGeometry,
   Color,
   InstancedMesh,
+  Matrix4,
   Mesh,
   MeshToonMaterial,
   NearestFilter,
@@ -436,6 +437,39 @@ describe('scene', () => {
     const crowdBody = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-bodies'));
     crowdBody.geometry.computeBoundingBox();
     expect(Math.abs(/** @type {import('three').Box3} */ (crowdBody.geometry.boundingBox).min.y)).toBeLessThan(0.01);
+  });
+
+  it('gives everyone in the crowd hair, with long hair only on the full tier', () => {
+    for (const quality of [desktop, phone]) {
+      const world = buildScene(quality);
+      world.update(STILL_T);
+      const bodies = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-bodies'));
+      const short = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-hair'));
+      const long = /** @type {InstancedMesh | undefined} */ (world.scene.getObjectByName('crowd-hair-long'));
+      expect(short.count + (long?.count ?? 0)).toBe(bodies.count);
+      if (quality.lite) expect(long).toBeUndefined();
+      else expect(long?.count).toBeGreaterThan(0);
+      // Every hair instance sits on a head, none left at the origin.
+      const m = new Matrix4();
+      const at = new Vector3();
+      for (const mesh of [short, long]) {
+        if (!mesh) continue;
+        for (let i = 0; i < mesh.count; i++) {
+          at.setFromMatrixPosition(mesh.getMatrixAt(i, m));
+          expect(at.y).toBeGreaterThan(0.8);
+        }
+      }
+    }
+  });
+
+  it('keeps sparkles out of the viewer’s face', () => {
+    const world = buildScene(desktop);
+    world.update(STILL_T);
+    const sparkles = /** @type {InstancedMesh} */ (world.scene.getObjectByName('sparkles'));
+    const m = new Matrix4();
+    const at = new Vector3();
+    for (let i = 0; i < sparkles.count; i++)
+      expect(at.setFromMatrixPosition(sparkles.getMatrixAt(i, m)).distanceTo(EYE)).toBeGreaterThan(6.5);
   });
 
   it('shows the site ads on the projector wall when given them', () => {
