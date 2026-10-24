@@ -1,6 +1,7 @@
-// Crayon on the models themselves. No full-screen pass: each lit or unlit
-// material in the scene is coloured in with wax strokes, and each solid gets
-// an ink outline drawn as an inverted hull.
+// Crayon on the models themselves. No full-screen pass: each cel-shaded or
+// unlit material in the scene is coloured in with wax strokes on top of its
+// toon bands, cel-shaded surfaces get a soft stepped rim light, and each solid
+// gets a bold ink outline drawn as an inverted hull.
 //
 // The strokes come from one small texture made at load time (crayonTexture):
 // overlapping tapered strokes with the paper showing through the gaps, a
@@ -32,6 +33,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
+  MeshToonMaterial,
   NormalBlending,
   RepeatWrapping,
   RGBAFormat,
@@ -42,7 +44,7 @@ import {
   Vector4,
 } from 'three';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
-import { INK, PAPER } from './palette.js';
+import { INK, PAPER, PEACH } from './palette.js';
 
 /** How many times a second the drawing boils to its next variant. */
 export const BOIL_FPS = 5;
@@ -51,7 +53,7 @@ export const BOIL_VARIANTS = 4;
 /** One tile of the stroke texture covers this much of a surface, in metres. */
 export const STROKE_TILE = 1.6;
 /** The ink outline's width on screen, in CSS pixels. */
-export const OUTLINE_PX = 2;
+export const OUTLINE_PX = 3;
 /** The stroke texture's size in texels (square, tileable). */
 export const TEXTURE_SIZE = 256;
 
@@ -212,6 +214,7 @@ const fragmentPars = /* glsl */ `
 uniform sampler2D tCrayon;
 uniform vec4 uCrayonVariant;
 uniform vec3 uCrayonPaper;
+uniform vec3 uCrayonRim;
 varying vec3 vCrayonPos;
 varying vec3 vCrayonNormal;
 // Sampled with explicit gradients (from the position, which is continuous), so
@@ -268,26 +271,40 @@ const fragmentMain = /* glsl */ `
   vec3 cn = vCrayonNormal;
   float wax = crayonWax(vCrayonPos, length(cn) > 0.0 ? normalize(cn) : vec3(0.0, 0.0, 1.0));
   float covered = smoothstep(0.2, 0.55, wax);
-  // Dark colours (the marquee's backing, eyes, tyres) stay dark: the paper barely shows through them.
+  // Subtle, on top of the toon bands: the paper shows through as a light tint
+  // of the colour, and dark colours (eyes, the marquee board) barely change.
   float tone = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
-  vec3 paper = mix(diffuseColor.rgb, uCrayonPaper, mix(0.1, 0.6, smoothstep(0.01, 0.12, tone)));
-  diffuseColor.rgb = mix(paper, diffuseColor.rgb * (0.82 + 0.3 * wax), covered);
+  vec3 paper = mix(diffuseColor.rgb, uCrayonPaper, mix(0.06, 0.32, smoothstep(0.01, 0.12, tone)));
+  diffuseColor.rgb = mix(paper, diffuseColor.rgb * (0.93 + 0.12 * wax), covered);
 }
+`;
+
+// A soft rim of warm light round cel-shaded forms, stepped like the bands.
+const rimMain = /* glsl */ `
+#ifdef CRAYON_RIM
+{
+  float facing = max(dot(normal, normalize(vViewPosition)), 0.0);
+  outgoingLight += uCrayonRim * smoothstep(0.3, 0.22, facing) * 0.28;
+}
+#endif
 `;
 
 /**
  * Crayon for one scene: the stroke texture, the patch that puts it on
  * materials, the outlines, and the boil they share. Call `setSize` with the
  * canvas size in device pixels and the device pixel ratio, `setBoil` with the
- * clock, and `apply` once on the built scene.
- * @param {{ lite?: boolean, anisotropy?: number }} [options]
+ * clock, and `apply` once on the built scene. `strokes: false` (software
+ * renderers) keeps the cel shading, rim light and outlines but leaves out the
+ * wax strokes, the costliest part per pixel.
+ * @param {{ lite?: boolean, anisotropy?: number, strokes?: boolean }} [options]
  */
-export function createCrayon({ lite = false, anisotropy = 1 } = {}) {
+export function createCrayon({ lite = false, anisotropy = 1, strokes = true } = {}) {
   const map = crayonMap(anisotropy);
   const shared = {
     tCrayon: { value: map },
     uCrayonVariant: { value: new Vector4(1, 0, 0, 0) },
     uCrayonPaper: { value: new Color(PAPER) },
+    uCrayonRim: { value: new Color(PEACH) },
   };
   const outline = new ShaderMaterial({
     name: 'crayon-outline',
@@ -308,7 +325,12 @@ export function createCrayon({ lite = false, anisotropy = 1 } = {}) {
       uniform vec2 uRes;
       uniform float uWidth;
       uniform float uSeed;
-      float jitter(vec3 p) { return fract(sin(dot(floor(p * 5.0) + uSeed * 7.13, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+      // A hand-inked line: thicker and thinner along its length, a little different each boil.
+      float jitter(vec3 p) {
+        float a = sin(dot(p, vec3(3.1, 2.3, 2.9)) + uSeed * 1.7);
+        float b = sin(dot(p, vec3(-1.7, 4.1, 1.3)) * 1.9 + uSeed * 2.3);
+        return 0.5 + 0.3 * a + 0.2 * b;
+      }
       void main() {
         vec4 local = vec4(position, 1.0);
         vec3 n = normal;
@@ -322,7 +344,7 @@ export function createCrayon({ lite = false, anisotropy = 1 } = {}) {
         vec2 dir = (projectionMatrix * vec4(normalize(mat3(modelViewMatrix) * n), 0.0)).xy;
         float len = length(dir);
         dir = len > 1e-5 ? dir / len : vec2(0.0);
-        clip.xy += dir * uWidth * (0.7 + 0.6 * jitter(position)) * 2.0 / uRes * clip.w;
+        clip.xy += dir * uWidth * (0.65 + 0.6 * jitter(position)) * 2.0 / uRes * clip.w;
         gl_Position = clip;
         #include <fog_vertex>
       }`,
@@ -341,7 +363,8 @@ export function createCrayon({ lite = false, anisotropy = 1 } = {}) {
   function crayonize(material) {
     if (material.userData.crayon) return;
     material.userData.crayon = true;
-    material.defines = { ...material.defines, ...(lite ? { CRAYON_LITE: 1 } : {}) };
+    const toon = material instanceof MeshToonMaterial;
+    material.defines = { ...material.defines, ...(lite ? { CRAYON_LITE: 1 } : {}), ...(toon ? { CRAYON_RIM: 1 } : {}) };
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, shared);
       shader.vertexShader = shader.vertexShader
@@ -349,10 +372,14 @@ export function createCrayon({ lite = false, anisotropy = 1 } = {}) {
         .replace('#include <begin_vertex>', `#include <begin_vertex>\n${vertexMain}`);
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\n${fragmentPars}`)
-        .replace('#include <color_fragment>', `#include <color_fragment>\n${fragmentMain}`);
+        .replace(
+          '#include <color_fragment>',
+          strokes ? `#include <color_fragment>\n${fragmentMain}` : '#include <color_fragment>',
+        )
+        .replace('#include <opaque_fragment>', `${rimMain}\n#include <opaque_fragment>`);
     };
     // One compiled program per variant of the patch, not per material.
-    material.customProgramCacheKey = () => (lite ? 'crayon-lite' : 'crayon');
+    material.customProgramCacheKey = () => (strokes ? (lite ? 'crayon-lite' : 'crayon') : 'crayon-plain');
     material.needsUpdate = true;
   }
 
@@ -371,7 +398,9 @@ export function createCrayon({ lite = false, anisotropy = 1 } = {}) {
       if (!mesh.isMesh) return;
       for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
         const opaque = !m.transparent && m.blending === NormalBlending;
-        if (opaque && (m instanceof MeshLambertMaterial || m instanceof MeshBasicMaterial)) crayonize(m);
+        const kind =
+          m instanceof MeshToonMaterial || m instanceof MeshLambertMaterial || m instanceof MeshBasicMaterial;
+        if (opaque && kind) crayonize(m);
       }
       if (mesh.userData.hull || mesh.userData.outline) outlined.push(mesh);
     });

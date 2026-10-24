@@ -1,23 +1,32 @@
-// Premiere night at the Vancouver Art Gallery, in low-poly shapes, seen from
-// the middle of it. The camera stands on the red carpet at eye height and
-// turns a full circle, forever:
+// Premiere night at the Vancouver Art Gallery, in soft low-poly shapes drawn
+// like a pastel picture book, seen from the middle of it. The camera stands on
+// the carpet at eye height and turns a full circle, forever:
 //
-//   north  the gallery's neoclassical facade, steps, dome and the SANDBOX
-//          marquee over the portico
-//   east   the step-and-repeat photo wall, the projector tower beaming the
-//          event's ads onto the big screen, a food truck
+//   north  the gallery's neoclassical facade: columns with bases and
+//          capitals, a dentilled cornice, the steps with the carpet running
+//          up every riser, the dome, and the SANDBOX marquee mounted on the
+//          portico, with bunting strung between the columns
+//   east   the step-and-repeat wall with a director's chair, the projector
+//          tower beaming the event's ads onto the big screen, a food truck
 //   south  a balloon arch where the carpet meets the kerb, paparazzi behind
 //          the ropes, limos pulling up, and the shops and hotel across the street
 //   west   Robson Square's terraces and fountain, and activation tents
 //
 // with a crowd, influencers, phones and flashes all round, a skyline, the
-// North Shore mountains, searchlights and confetti overhead.
+// North Shore mountains under a lilac-and-peach dusk, searchlights, sparkles
+// and confetti overhead.
 //
-// Everything static is merged into one vertex-coloured mesh; the moving parts
-// are a handful of meshes and instanced meshes. `update(t)` is a pure function
-// of time, so a still frame at a given t always looks the same, and nothing
-// in it switches on or off from one frame to the next: lights fade, flashes
-// rise and fall over several frames, confetti grows in and out of sight.
+// Everything is cel-shaded (MeshToonMaterial with three bands, lilac in the
+// shade) in muted pastels from the site's palette. Everything that never
+// moves is merged into one vertex-coloured mesh; the moving parts are a
+// handful of meshes and instanced meshes. Every prop stands on something:
+// feet on the ground or the carpet, posts on their bases, ropes hooked to the
+// post tops, palms in their planters, bunting on the columns, the marquee
+// bolted to the portico, and soft contact shadows under people and props.
+// `update(t)` is a pure function of time, so a still frame at a given t always
+// looks the same, and nothing in it switches on or off from one frame to the
+// next: lights fade, flashes rise and fall over several frames, confetti and
+// sparkles grow in and out of sight.
 import {
   AddEquation,
   BackSide,
@@ -29,6 +38,7 @@ import {
   ConeGeometry,
   CustomBlending,
   CylinderGeometry,
+  DataTexture,
   DirectionalLight,
   DoubleSide,
   DynamicDrawUsage,
@@ -41,19 +51,23 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
-  MeshLambertMaterial,
+  MeshToonMaterial,
+  NearestFilter,
   NoBlending,
   Object3D,
   OneFactor,
   PerspectiveCamera,
   PlaneGeometry,
   Quaternion,
+  RedFormat,
+  RGBAFormat,
   Scene,
   ShaderMaterial,
   Shape,
   ShapeGeometry,
   SphereGeometry,
   SrcAlphaFactor,
+  TorusGeometry,
   TubeGeometry,
   Vector3,
   ZeroFactor,
@@ -61,25 +75,60 @@ import {
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { hullGeometry } from './crayon.js';
 import { bulbLayout } from './marquee.js';
-import { BLUE, BRIGHTS, GREEN, INK, ORANGE, PINK, PURPLE, RED, YELLOW } from './palette.js';
+import {
+  BRIGHTS,
+  BUTTER,
+  BUTTER_MID,
+  COCOA,
+  DUSK,
+  INK,
+  LILAC,
+  LILAC_DEEP,
+  LILAC_MID,
+  MIDS,
+  MINT,
+  MINT_DEEP,
+  MINT_MID,
+  PAPER,
+  PEACH,
+  PEACH_MID,
+  PLUM,
+  ROSE,
+  ROSE_DEEP,
+  ROSE_MID,
+  SKY,
+  SKY_MID,
+} from './palette.js';
 import { hash1, rng } from './quality.js';
 
-const STONE = '#E9DCC0';
-const STONE_SHADE = '#CDBB98';
-const PAVING = '#D8C9A8';
-const ROAD = '#4A4650';
-const CARPET = '#C8201C';
-const GOLD = '#D9A520';
-const WINDOW = '#FFD75E';
-const DOME = '#6FB3A0';
-const LEAF = '#2F8F45';
-const SKIN = ['#F4C8A0', '#E9B48A', '#C98A5B', '#8D5A3B', '#F1D2B6'];
+// Stone, ground and the odd material, all muted.
+const STONE = '#F3E7D3';
+const STONE_SHADE = '#E2D0B6';
+const STONE_TRIM = '#FBF4E6';
+const STONE_LINE = '#CDB89A';
+const PAVING = '#EAD9BC';
+const PAVING_LINE = '#DCC6A4';
+const GROUND = '#C9B9A0';
+const ROAD = '#857C99';
+const KERB = '#E8DCCB';
+const CARPET = ROSE_MID;
+const BRASS = BUTTER_MID;
+const ROPE = '#A9617A';
+const WINDOW = '#FFE6B0';
+const DOME = '#A9D3C2';
+const WOOD = '#B99779';
+const WOOD_DARK = '#9E7E66';
+const METAL = '#B9B3CC';
+const SHOE = PLUM;
+const SKIN = ['#F8DAC6', '#EFC3A4', '#D9A27F', '#B07C5E', '#F3D9C4'];
 
 /** The street (Georgia St) runs east-west along this line. */
 const ROAD_Z = 23;
 /** Where the carpet meets the kerb. */
 const KERB_Z = ROAD_Z - 1.9;
-/** The viewer: on the red carpet, at eye height, between the street and the steps. */
+/** The top of the carpet on the plaza: people on it stand here. */
+const CARPET_TOP = 0.07;
+/** The viewer: on the carpet, at eye height, between the street and the steps. */
 export const EYE = new Vector3(0, 2.4, 13);
 /** The projector tower's foot, and the centre of the big screen it beams at. */
 const PROJECTOR = new Vector3(15, 0, 0.5);
@@ -89,6 +138,18 @@ export const REVOLUTION = 75;
 /** The moment drawn for reduced motion and the posters: facing the gallery, a limo at the kerb. */
 export const STILL_T = 11.2;
 const CYCLE = 26; // seconds for a limo to pull up, wait and leave
+/** The six columns of the portico, and where they stand. */
+const COLUMNS = [-8.4, -5, -1.7, 1.7, 5, 8.4];
+const COLUMN_Z = -2.4;
+/** Planters with palms at the corners of the carpet. */
+const PALMS = [
+  [-5.5, 2.6],
+  [5.5, 2.6],
+  [-5.5, KERB_Z - 1.2],
+  [5.5, KERB_Z - 1.2],
+];
+/** The step-and-repeat wall, and the director's chair beside it. */
+const CHAIR = new Vector3(5.2, 0, 11.9);
 
 /**
  * Additive light (searchlight and projector beams): it adds to what's behind
@@ -108,6 +169,23 @@ const LIGHT_BEAM = {
 /** @typedef {{ position: Vector3, weight: number }} Emitter */
 
 /**
+ * The cel-shading ramp: three flat bands with a crisp terminator where the
+ * light crosses the surface (dark below 0, mid to 0.5, lit above).
+ */
+const TOON_RAMP = (() => {
+  const ramp = new DataTexture(new Uint8Array([105, 105, 190, 255]), 4, 1, RedFormat);
+  ramp.minFilter = ramp.magFilter = NearestFilter;
+  ramp.generateMipmaps = false;
+  ramp.needsUpdate = true;
+  return ramp;
+})();
+
+/** A cel-shaded material. @param {import('three').MeshToonMaterialParameters} [params] */
+export function toon(params = {}) {
+  return new MeshToonMaterial({ gradientMap: TOON_RAMP, ...params });
+}
+
+/**
  * Collects static geometry with a baked colour, then merges it into one mesh.
  * The solid parts (not flat shapes, which have no inside) also make up the
  * mesh's ink outline hull (userData.hull, drawn by crayon.js).
@@ -122,8 +200,9 @@ export class Batch {
    * @param {BufferGeometry} geometry
    * @param {string} color
    * @param {Matrix4 | null} [matrix]
+   * @param {boolean} [outline] false to leave it out of the outline hull
    */
-  add(geometry, color, matrix = null) {
+  add(geometry, color, matrix = null, outline = true) {
     const g = geometry.index ? geometry.toNonIndexed() : geometry.clone();
     if (matrix) g.applyMatrix4(matrix);
     g.deleteAttribute('uv');
@@ -134,7 +213,7 @@ export class Batch {
     for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
     g.setAttribute('color', new BufferAttribute(colors, 3));
     this.parts.push(g);
-    if (geometry.type !== 'ShapeGeometry' && geometry.type !== 'PlaneGeometry') {
+    if (outline && geometry.type !== 'ShapeGeometry' && geometry.type !== 'PlaneGeometry') {
       const solid = new BufferGeometry();
       solid.setAttribute('position', /** @type {BufferAttribute} */ (g.getAttribute('position')).clone());
       this.solids.push(solid);
@@ -147,35 +226,64 @@ export class Batch {
     this.add(new BoxGeometry(w, h, d), color, place(x, y, z, ry));
   }
 
+  /** A box left out of the outline: small or flat details (windows, dentils) that an outline would only clutter. @param {number} w @param {number} h @param {number} d @param {string} color @param {number} x @param {number} y @param {number} z @param {number} [ry] */
+  detail(w, h, d, color, x, y, z, ry = 0) {
+    this.add(new BoxGeometry(w, h, d), color, place(x, y, z, ry), false);
+  }
+
   /** @param {number} rt @param {number} rb @param {number} h @param {number} seg @param {string} color @param {number} x @param {number} y @param {number} z */
   cylinder(rt, rb, h, seg, color, x, y, z) {
     this.add(new CylinderGeometry(rt, rb, h, seg), color, place(x, y, z));
   }
 
-  /** A low-poly tree: trunk and a round crown. @param {number} x @param {number} z @param {number} h @param {number} r @param {string} [leaf] */
-  tree(x, z, h, r, leaf = LEAF) {
-    this.cylinder(0.22, 0.32, h, 6, '#8A5A2B', x, h / 2, z);
-    this.add(new IcosahedronGeometry(r, 0), leaf, place(x, h + r * 0.7, z, x + z));
+  /**
+   * A smooth ball, optionally squashed or stretched.
+   * @param {number} r @param {string} color @param {number} x @param {number} y @param {number} z
+   * @param {[number, number, number]} [scale] @param {number} [detail]
+   */
+  ball(r, color, x, y, z, scale = [1, 1, 1], detail = 10) {
+    this.add(new SphereGeometry(r, detail, Math.max(6, Math.round(detail * 0.7))), color, placeScaled(x, y, z, scale));
   }
 
-  /** A thin pole between two points. @param {Vector3} a @param {Vector3} b @param {number} r @param {string} color */
-  pole(a, b, r, color) {
+  /**
+   * A tree: a trunk going into the ground and a crown of three soft clumps.
+   * @param {number} x @param {number} z @param {number} h @param {number} r @param {number} [seed]
+   */
+  tree(x, z, h, r, seed = x * 7 + z) {
+    this.cylinder(0.18, 0.28, h + 0.2, 6, WOOD, x, h / 2 - 0.1, z);
+    const tones = [MINT_MID, MINT_DEEP, MINT];
+    for (let k = 0; k < 3; k++) {
+      const a = seed + k * 2.1;
+      const rr = r * (0.75 + 0.15 * k);
+      this.add(
+        new IcosahedronGeometry(rr, k === 0 ? 1 : 0),
+        tones[k],
+        place(x + Math.cos(a) * r * 0.35, h + r * (0.55 + 0.25 * k), z + Math.sin(a) * r * 0.35, a),
+      );
+    }
+  }
+
+  /** A pole between two points. @param {Vector3} a @param {Vector3} b @param {number} r @param {string} color @param {number} [seg] */
+  pole(a, b, r, color, seg = 6) {
     const dir = b.clone().sub(a);
     const m = new Matrix4().makeRotationFromQuaternion(
       new Quaternion().setFromUnitVectors(new Vector3(0, 1, 0), dir.clone().normalize()),
     );
     m.setPosition(a.clone().add(b).multiplyScalar(0.5));
-    this.add(new CylinderGeometry(r, r, dir.length(), 6), color, m);
+    this.add(new CylinderGeometry(r, r, dir.length(), seg), color, m);
   }
 
-  /** @param {boolean} lit */
+  /** A soft tube through points. @param {Vector3[]} points @param {number} r @param {string} color @param {number} [segments] */
+  tube(points, r, color, segments = 16) {
+    this.add(new TubeGeometry(new CatmullRomCurve3(points), segments, r, 6, false), color);
+  }
+
+  /** @param {boolean} lit cel-shaded, or unlit (stars, the moon) */
   mesh(lit = true) {
     const geometry = mergeGeometries(this.parts);
     this.parts.forEach((p) => p.dispose());
     this.parts = [];
-    const material = lit
-      ? new MeshLambertMaterial({ vertexColors: true, flatShading: true })
-      : new MeshBasicMaterial({ vertexColors: true });
+    const material = lit ? toon({ vertexColors: true }) : new MeshBasicMaterial({ vertexColors: true });
     const mesh = new Mesh(geometry, material);
     if (this.solids.length) {
       const solids = mergeGeometries(this.solids);
@@ -197,6 +305,41 @@ function place(x, y, z, ry = 0, rx = 0, rz = 0) {
   return o.matrix;
 }
 
+/** @param {number} x @param {number} y @param {number} z @param {[number, number, number]} scale @param {number} [ry] @param {number} [rx] @param {number} [rz] */
+function placeScaled(x, y, z, scale, ry = 0, rx = 0, rz = 0) {
+  const o = new Object3D();
+  o.position.set(x, y, z);
+  o.rotation.set(rx, ry, rz);
+  o.scale.set(...scale);
+  o.updateMatrix();
+  return o.matrix;
+}
+
+/**
+ * Points along a hanging rope or string between two hooks: a catenary that
+ * drops `sag` at its middle.
+ * @param {Vector3} a @param {Vector3} b @param {number} sag @param {number} [n]
+ */
+function catenary(a, b, sag, n = 10) {
+  const span = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  // y = k cosh(x / k) drops k (cosh(span / 2k) - 1) at the middle: find the k
+  // that drops `sag` (bisection; a smaller k hangs deeper).
+  let lo = 1e-3;
+  let hi = 1e4;
+  for (let i = 0; i < 60; i++) {
+    const k = Math.sqrt(lo * hi);
+    if (k * (Math.cosh(span / (2 * k)) - 1) > sag) lo = k;
+    else hi = k;
+  }
+  const k = Math.sqrt(lo * hi);
+  return Array.from({ length: n + 1 }, (_, i) => {
+    const u = i / n;
+    const p = a.clone().lerp(b, u);
+    p.y += k * (Math.cosh((span * (u - 0.5)) / k) - Math.cosh(span / (2 * k)));
+    return p;
+  });
+}
+
 /** The projector's lens: on top of the tower, at the front of the projector. */
 function projectorLens() {
   const top = new Vector3(PROJECTOR.x, 6.05, PROJECTOR.z);
@@ -211,6 +354,57 @@ const smoothstep = (a, b, x) => {
   return u * u * (3 - 2 * u);
 };
 
+/** A soft round blob, dark in the middle and fading out: the contact shadows' alpha. */
+const BLOB = (() => {
+  const n = 64;
+  const data = new Uint8Array(n * n * 4);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const dx = (x + 0.5) / n - 0.5;
+      const dy = (y + 0.5) / n - 0.5;
+      const r = Math.min(1, Math.hypot(dx, dy) * 2);
+      const a = Math.round(255 * (1 - r * r) ** 2);
+      data.set([a, a, a, a], (y * n + x) * 4);
+    }
+  }
+  const tex = new DataTexture(data, n, n, RGBAFormat);
+  tex.needsUpdate = true;
+  return tex;
+})();
+
+/** The contact shadows' material: a soft lilac blob, under everything else drawn on the ground. */
+function shadowMaterial() {
+  return new MeshBasicMaterial({
+    color: '#7B6B98',
+    transparent: true,
+    opacity: 0.42,
+    alphaMap: BLOB,
+    depthWrite: false,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+    polygonOffsetUnits: -2,
+  });
+}
+
+/** Static contact shadows, merged: one flat blob per prop. */
+class Shadows {
+  /** @type {BufferGeometry[]} */
+  parts = [];
+  /** @param {number} x @param {number} z @param {number} w @param {number} d @param {number} [y] @param {number} [ry] */
+  add(x, z, w, d, y = 0.012, ry = 0) {
+    const g = new PlaneGeometry(w, d).rotateX(-Math.PI / 2);
+    g.applyMatrix4(place(x, y, z, ry));
+    this.parts.push(g);
+  }
+  mesh() {
+    const mesh = new Mesh(mergeGeometries(this.parts), shadowMaterial());
+    this.parts.forEach((p) => p.dispose());
+    mesh.renderOrder = 1;
+    mesh.name = 'contact-shadows';
+    return mesh;
+  }
+}
+
 /**
  * Builds the scene for a quality level.
  * @param {Quality} quality
@@ -219,35 +413,38 @@ const smoothstep = (a, b, x) => {
 export function buildScene(quality, { adTexture = null } = {}) {
   const random = rng(2027);
   const scene = new Scene();
-  scene.background = new Color('#1E2A66');
-  scene.fog = new Fog('#3B2F7A', 60, 190);
+  scene.background = new Color('#A3A6D6');
+  scene.fog = new Fog('#CDBCE0', 70, 215);
 
   const camera = new PerspectiveCamera(56, 16 / 9, 0.4, 260);
   camera.rotation.order = 'YXZ';
 
-  scene.add(new HemisphereLight('#FFF1D6', '#5B4A8A', 2.1));
-  const sun = new DirectionalLight('#FFE2B0', 1.6);
+  // Warm low sun from the west-southwest; a lilac sky fills the shade.
+  scene.add(new HemisphereLight('#FFF4EC', '#B6A3D8', 1.25));
+  const sun = new DirectionalLight('#FFE8D4', 2.1);
   sun.position.set(-14, 26, 22);
   scene.add(sun);
 
-  // Scenery that never moves: its outlines can share one draw (crayon.js).
-  const scenery = [
-    sky(),
-    gallery(),
-    plaza(),
-    robsonSquare(random),
-    eastSide(),
-    acrossTheStreet(random),
-    skyline(random, quality.lite ? 26 : 44, !quality.lite),
-  ];
-  for (const part of scenery) {
+  const shadows = new Shadows();
+
+  // Everything that never moves, in one cel-shaded mesh with one outline.
+  const still = new Batch();
+  gallery(still);
+  plaza(still, shadows);
+  robsonSquare(still, shadows, random);
+  eastSide(still, shadows);
+  acrossTheStreet(still, random);
+  skyline(still, random, quality.lite ? 26 : 44, !quality.lite);
+  const marquee = marqueeSign(still);
+  const scenery = still.mesh();
+  scenery.name = 'scenery';
+
+  const sky = skyDome();
+  for (const part of [sky, scenery, marquee.group]) {
     part.traverse((o) => (o.userData.still = true));
     scene.add(part);
   }
-
-  const marquee = marqueeSign();
-  marquee.group.traverse((o) => (o.userData.still = true));
-  scene.add(marquee.group);
+  scene.add(shadows.mesh());
 
   const ad = adScreen(adTexture);
   scene.add(ad.group);
@@ -255,13 +452,20 @@ export function buildScene(quality, { adTexture = null } = {}) {
   const lights = searchlights(quality.searchlights);
   scene.add(lights.group);
 
-  const people = crowd(quality.crowd, quality.lite ? 6 : 12, random);
-  scene.add(people.group);
-
+  // Moving contact shadows (crowd, influencers, limos) share one instanced draw.
+  const people = crowd(quality.crowd, quality.lite ? 6 : 12, random, quality.lite);
   const stars = influencers(random, quality.lite);
-  scene.add(stars.group);
-
-  const limos = [limo(PINK), limo('#FFFFFF')];
+  const limos = [limo(ROSE), limo(PAPER)];
+  const blobs = new InstancedMesh(
+    new PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+    shadowMaterial(),
+    people.size + stars.size + limos.length,
+  );
+  blobs.instanceMatrix.setUsage(DynamicDrawUsage);
+  blobs.frustumCulled = false;
+  blobs.renderOrder = 1;
+  blobs.name = 'moving-shadows';
+  scene.add(people.group, stars.group, blobs);
   limos.forEach((l) => scene.add(l.group));
 
   const flashes = flashBulbs([...people.emitters, ...stars.emitters], quality.lite ? 14 : 22);
@@ -269,6 +473,9 @@ export function buildScene(quality, { adTexture = null } = {}) {
 
   const paper = confetti(quality.confetti, random);
   scene.add(paper.mesh);
+
+  const twinkles = sparkles(quality.lite ? 18 : 40, random);
+  scene.add(twinkles.mesh);
 
   /**
    * Sets the lens for an aspect ratio: a wide view on landscape screens, and
@@ -299,6 +506,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
     shift.y = y;
   }
 
+  const m = new Matrix4();
   /**
    * @param {number} t seconds
    * @param {number} [cameraT] where the camera is, if not at t (graphics QA
@@ -320,11 +528,21 @@ export function buildScene(quality, { adTexture = null } = {}) {
     marquee.update(t);
     ad.update(t);
     lights.update(t);
-    people.update(t);
-    stars.update(t);
-    limos.forEach((l, i) => l.update(t + i * (CYCLE / 2)));
+    let k = people.update(t, blobs, 0);
+    k = stars.update(t, blobs, k);
+    limos.forEach((l, i) => {
+      l.update(t + i * (CYCLE / 2));
+      // The limo's shadow: long and soft under it, wherever it is.
+      blobs.setMatrixAt(
+        k++,
+        m.compose(new Vector3(l.group.position.x, 0.03, ROAD_Z), new Quaternion(), new Vector3(9, 1, 3)),
+      );
+    });
+    blobs.count = k;
+    blobs.instanceMatrix.needsUpdate = true;
     flashes.update(t, camera.quaternion);
     paper.update(t);
+    twinkles.update(t, camera.quaternion);
   }
 
   setAspect(16 / 9);
@@ -333,16 +551,17 @@ export function buildScene(quality, { adTexture = null } = {}) {
   return { scene, camera, update, setAspect, setShift, anchors: { marquee: marquee.anchor } };
 }
 
-function sky() {
+/** The dusk sky, a pale moon and stars, and the North Shore mountains. */
+function skyDome() {
   const geometry = new SphereGeometry(200, 24, 12);
   const material = new ShaderMaterial({
     side: BackSide,
     depthWrite: false,
     fog: false,
     uniforms: {
-      top: { value: new Color('#1B2560') },
-      mid: { value: new Color('#5A3C9E') },
-      low: { value: new Color('#F08A4B') },
+      top: { value: new Color('#8F94CC') },
+      mid: { value: new Color('#C6B4E0') },
+      low: { value: new Color('#F5C4B2') },
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -354,10 +573,10 @@ function sky() {
       uniform vec3 top; uniform vec3 mid; uniform vec3 low;
       varying vec3 vDir;
       void main() {
-        // The sunset glow is strongest in the west, behind Robson Square.
-        float west = 0.55 + 0.45 * max(0.0, -vDir.x);
-        vec3 c = mix(mix(mid, low, west), mid, smoothstep(-0.02, 0.16, vDir.y));
-        c = mix(c, top, smoothstep(0.16, 0.5, vDir.y));
+        // Lilac overhead, peach low down, warmest in the west behind Robson Square.
+        float west = 0.45 + 0.55 * max(0.0, -vDir.x);
+        vec3 c = mix(mix(mid, low, west), mid, smoothstep(-0.02, 0.2, vDir.y));
+        c = mix(c, top, smoothstep(0.18, 0.62, vDir.y));
         gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -365,24 +584,24 @@ function sky() {
   const dome = new Mesh(geometry, material);
   dome.renderOrder = -1;
 
-  // A crayon moon and stars all the way round, each turned to face the viewer.
+  // A soft moon and a few stars, each turned to face the viewer.
   const b = new Batch();
-  b.add(new CircleShape(5.5).geometry(), '#FFF3C4', place(-60, 62, -150, Math.atan2(60, 150)));
+  b.add(new CircleShape(5).geometry(), '#FFF6E2', place(-60, 66, -150, Math.atan2(60, 150)));
   const r = rng(7);
-  for (let i = 0; i < 48; i++) {
-    const a = (i / 48) * Math.PI * 2 + r() * 0.12;
+  for (let i = 0; i < 30; i++) {
+    const a = (i / 30) * Math.PI * 2 + r() * 0.15;
     const d = 170;
-    const y = 30 + r() * 70;
+    const y = 52 + r() * 55;
     b.add(
-      starShape(1.2 + r() * 1.4, 0.45),
-      i % 3 ? '#FFF3C4' : YELLOW,
+      starShape(0.9 + r() * 1.1, 0.45),
+      i % 3 ? '#FFF7E6' : BUTTER,
       place(Math.sin(a) * d, y, -Math.cos(a) * d, -a),
     );
   }
   const lit = b.mesh(false);
   lit.renderOrder = -1;
 
-  // The North Shore mountains, behind the gallery.
+  // The North Shore mountains, behind the gallery, softened by the haze.
   const hills = new Batch();
   const peaks = [
     [-130, 34, 50],
@@ -395,8 +614,8 @@ function sky() {
   ];
   peaks.forEach(([x, tall, w], i) => {
     const h = tall * 0.65;
-    hills.add(new CylinderGeometry(0, w, h, 5), i % 2 ? '#3E4F86' : '#46598F', place(x, h / 2 - 2, -150, i));
-    hills.add(new CylinderGeometry(0, w * 0.28, h * 0.28, 5), '#F4F1FF', place(x, h - h * 0.14 - 2, -150, i));
+    hills.add(new CylinderGeometry(0, w, h, 5), i % 2 ? '#9A97C7' : '#A8A2CF', place(x, h / 2 - 2, -150, i));
+    hills.add(new CylinderGeometry(0, w * 0.28, h * 0.28, 5), '#F8F3FF', place(x, h - h * 0.14 - 2, -150, i));
   });
   const ridge = hills.mesh();
 
@@ -430,198 +649,395 @@ function starShape(r, inner) {
   return new ShapeGeometry(s);
 }
 
-/** @param {number} w @param {number} h downward-pointing pennant */
-function triangle(w, h) {
+/** A pennant: a little downward triangle of card, thick enough to have an outline. @param {number} w @param {number} h */
+function pennant(w, h) {
   const s = new Shape();
   s.moveTo(-w / 2, 0);
   s.lineTo(w / 2, 0);
   s.lineTo(0, -h);
   s.lineTo(-w / 2, 0);
-  return new ShapeGeometry(s);
+  return new ExtrudeGeometry(s, { depth: 0.03, bevelEnabled: false }).translate(0, 0, -0.015);
 }
 
-function gallery() {
-  const b = new Batch();
+/**
+ * An Ionic column standing on the portico floor: a square plinth, a rounded
+ * base, a gently tapering shaft with flutes, and a capital with scrolls.
+ * @param {Batch} b @param {number} x @param {number} z @param {number} floor @param {number} top
+ */
+function column(b, x, z, floor, top) {
+  b.box(1.7, 0.36, 1.7, STONE_TRIM, x, floor + 0.18, z);
+  b.add(new TorusGeometry(0.66, 0.13, 5, 16), STONE, place(x, floor + 0.49, z, 0, Math.PI / 2));
+  b.cylinder(0.7, 0.74, 0.16, 18, STONE_TRIM, x, floor + 0.44, z);
+  const shaftBottom = floor + 0.6;
+  const shaftTop = top - 0.75;
+  const h = shaftTop - shaftBottom;
+  b.cylinder(0.56, 0.66, h, 18, '#F8F1E3', x, shaftBottom + h / 2, z);
+  // Flutes: shallow lines down the shaft, a crease every 45 degrees.
+  for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2 + Math.PI / 8;
+    b.add(
+      new BoxGeometry(0.05, h * 0.92, 0.05),
+      STONE_LINE,
+      placeScaled(x + Math.sin(a) * 0.6, shaftBottom + h / 2, z + Math.cos(a) * 0.6, [1, 1, 1], a, 0, 0),
+      false,
+    );
+  }
+  // Capital: a collar, the echinus, scrolls either side, and the square abacus.
+  b.cylinder(0.6, 0.58, 0.12, 18, STONE_TRIM, x, shaftTop + 0.06, z);
+  b.cylinder(0.78, 0.6, 0.26, 18, STONE, x, shaftTop + 0.25, z);
+  for (const sx of [-1, 1]) {
+    b.add(new TorusGeometry(0.17, 0.07, 4, 10), STONE_TRIM, place(x + sx * 0.66, shaftTop + 0.3, z + 0.18));
+    b.add(new TorusGeometry(0.17, 0.07, 4, 10), STONE_TRIM, place(x + sx * 0.66, shaftTop + 0.3, z - 0.18));
+  }
+  b.box(1.75, 0.22, 1.6, STONE_TRIM, x, top - 0.11, z);
+}
+
+/** @param {Batch} b */
+function gallery(b) {
   // Podium and main block: front face at z = -6.
   b.box(46, 1.2, 15, STONE_SHADE, 0, 0.6, -13);
   b.box(42, 8.4, 13, STONE, 0, 5.4, -12.5);
-  b.box(43, 0.7, 13.8, '#F3EBD8', 0, 9.95, -12.5);
+  // A cornice with a row of dentils under it, all the way along.
+  b.box(43, 0.7, 13.8, STONE_TRIM, 0, 9.95, -12.5);
   b.box(41, 0.9, 12, STONE_SHADE, 0, 10.75, -12.5);
+  for (let x = -20.6; x <= 20.6; x += 0.62) b.detail(0.3, 0.3, 0.3, STONE_TRIM, x, 9.45, -5.95);
   // Side pavilions step forward.
   for (const sx of [-1, 1]) {
     b.box(9, 9.4, 14, STONE, sx * 17, 5.9, -12.4);
-    b.box(9.8, 0.7, 14.6, '#F3EBD8', sx * 17, 10.9, -12.4);
+    b.box(9.8, 0.7, 14.6, STONE_TRIM, sx * 17, 10.9, -12.4);
+    for (let x = 12.8; x <= 21.2; x += 0.62) b.detail(0.3, 0.3, 0.3, STONE_TRIM, sx * x, 10.4, -5.0);
     b.box(9, 0.5, 0.4, STONE_SHADE, sx * 17, 1.6, -5.25);
-    // Lit windows, two floors, standing well proud of the walls.
-    for (const wx of [9, 11.4]) {
-      for (const wy of [3.6, 7.2]) b.box(1.1, 2.1, 0.3, WINDOW, sx * wx, wy, -5.9);
+    // Lit windows, two floors, in frames with sills.
+    for (const [wx, wz] of [
+      [9, -5.9],
+      [11.4, -5.9],
+      [19.6, -5.3],
+    ]) {
+      for (const wy of [3.6, 7.3]) {
+        b.box(1.4, 2.4, 0.2, STONE_TRIM, sx * wx, wy, wz + 0.02);
+        b.detail(1.0, 1.9, 0.3, WINDOW, sx * wx, wy, wz + 0.05);
+        b.detail(0.08, 1.9, 0.34, STONE_TRIM, sx * wx, wy, wz + 0.06);
+        b.box(1.6, 0.16, 0.4, STONE_SHADE, sx * wx, wy - 1.25, wz + 0.1);
+      }
     }
-    for (const wy of [3.6, 7.6]) b.box(1.2, 2.3, 0.3, WINDOW, sx * 19.6, wy, -5.3);
-    // Banners.
-    b.box(2.6, 6.4, 0.2, sx < 0 ? RED : BLUE, sx * 15, 6.2, -5.2);
-    b.box(2.2, 0.5, 0.2, YELLOW, sx * 15, 6.2, -5.0);
+    // Banners hung from brackets on the pavilion walls.
+    b.box(2.6, 6.2, 0.12, sx < 0 ? ROSE_MID : SKY_MID, sx * 15, 6.1, -5.15);
+    b.box(2.6, 0.5, 0.14, BUTTER, sx * 15, 4.3, -5.08);
+    b.pole(new Vector3(sx * 15 - 1.5, 9.3, -5.1), new Vector3(sx * 15 + 1.5, 9.3, -5.1), 0.06, BRASS);
+    for (const dx of [-1.4, 1.4]) b.box(0.1, 0.1, 0.9, BRASS, sx * 15 + dx, 9.3, -5.5);
   }
-  // Portico floor and steps (8 steps up to y = 2.2).
+  // Portico floor and steps (8 steps up to y = 2.2), each with a darker nosing line.
   b.box(21, 2.2, 5.6, STONE_SHADE, 0, 1.1, -3.6);
   for (let i = 0; i < 8; i++) {
     const h = 2.2 - i * 0.275;
-    b.box(22 - i * 0.2, h, 0.6, i % 2 ? STONE : '#F1E6CF', 0, h / 2, -0.55 + i * 0.55);
+    const front = -0.25 + i * 0.55;
+    b.box(22 - i * 0.2, h, 0.6, i % 2 ? STONE : '#F5EADA', 0, h / 2, -0.55 + i * 0.55);
+    b.add(new BoxGeometry(22 - i * 0.2, 0.05, 0.05), STONE_LINE, place(0, h - 0.03, front + 0.005), false);
   }
-  // Six Ionic-ish columns.
-  for (const x of [-8.4, -5, -1.7, 1.7, 5, 8.4]) {
-    b.box(1.7, 0.5, 1.7, '#F3EBD8', x, 2.45, -2.4);
-    b.cylinder(0.62, 0.7, 6.9, 10, '#F7F0E0', x, 6.15, -2.4);
-    b.box(1.9, 0.45, 1.5, '#F3EBD8', x, 9.8, -2.4);
-  }
-  // Entablature and pediment, with the tympanum set clearly inside it.
-  b.box(19.6, 1.3, 5.4, '#F3EBD8', 0, 10.65, -3.9);
+  // Six Ionic columns on the portico floor, up to the entablature.
+  for (const x of COLUMNS) column(b, x, COLUMN_Z, 2.2, 10.0);
+  // Entablature, and the pediment with its tympanum set clearly inside it.
+  b.box(19.6, 1.3, 5.4, STONE_TRIM, 0, 10.65, -3.9);
+  b.box(20.2, 0.22, 5.8, STONE_SHADE, 0, 11.36, -3.9);
+  for (let x = -9.5; x <= 9.5; x += 0.6) b.detail(0.28, 0.26, 0.28, STONE_TRIM, x, 10.08, -1.12);
   const pediment = new Shape();
   pediment.moveTo(-10.2, 0);
   pediment.lineTo(10.2, 0);
   pediment.lineTo(0, 3.3);
   pediment.lineTo(-10.2, 0);
-  b.add(new ExtrudeGeometry(pediment, { depth: 5.6, bevelEnabled: false }), STONE, place(0, 11.3, -6.6));
+  b.add(new ExtrudeGeometry(pediment, { depth: 5.6, bevelEnabled: false }), STONE, place(0, 11.45, -6.6));
   const tympanum = new Shape();
   tympanum.moveTo(-8.4, 0);
   tympanum.lineTo(8.4, 0);
   tympanum.lineTo(0, 2.6);
   tympanum.lineTo(-8.4, 0);
-  b.add(new ExtrudeGeometry(tympanum, { depth: 0.1, bevelEnabled: false }), STONE_SHADE, place(0, 11.65, -1.0));
-  // Doorway, glowing.
-  b.box(3.4, 5, 0.3, WINDOW, 0, 4.7, -6.05);
-  b.box(4.2, 0.5, 0.5, STONE_SHADE, 0, 7.4, -5.95);
+  b.add(new ExtrudeGeometry(tympanum, { depth: 0.1, bevelEnabled: false }), STONE_SHADE, place(0, 11.8, -1.0));
+  // The doorway: a warm glow in a moulded frame, double doors open.
+  b.box(4.6, 6.0, 0.25, STONE_TRIM, 0, 5.2, -6.02);
+  b.box(3.4, 5, 0.3, WINDOW, 0, 4.7, -5.98);
+  b.box(4.8, 0.45, 0.6, STONE_SHADE, 0, 7.55, -5.85);
+  for (const sx of [-1, 1]) b.box(0.12, 4.8, 1.3, SKY_MID, sx * 1.75, 4.6, -5.3, sx * 0.5);
   // Drum, dome and lantern.
-  b.cylinder(4.6, 4.8, 2.6, 16, STONE, 0, 12.4, -13);
-  b.cylinder(4.9, 4.9, 0.5, 16, '#F3EBD8', 0, 13.9, -13);
-  b.add(new SphereGeometry(4.6, 16, 6, 0, Math.PI * 2, 0, Math.PI / 2), DOME, place(0, 14.1, -13));
-  b.cylinder(0.9, 1.1, 1.4, 8, '#F3EBD8', 0, 19.3, -13);
-  b.add(new IcosahedronGeometry(0.55, 0), GOLD, place(0, 20.4, -13));
-  // Bunting between the columns, below the marquee.
-  for (let i = 0; i < 26; i++) {
-    const x = -9.6 + i * 0.77;
-    const sag = Math.sin(((x + 9.6) / 3.36) * Math.PI) ** 2 * 0.5;
-    b.add(triangle(0.55, 0.8), BRIGHTS[i % BRIGHTS.length], place(x, 6.9 - Math.abs(sag), -1.0));
+  b.cylinder(4.6, 4.8, 2.6, 24, STONE, 0, 12.4, -13);
+  for (let k = 0; k < 16; k++) {
+    const a = (k / 16) * Math.PI * 2;
+    b.detail(0.35, 2.2, 0.2, STONE_TRIM, Math.sin(a) * 4.72, 12.4, -13 + Math.cos(a) * 4.72, a);
   }
-  return b.mesh();
+  b.cylinder(4.9, 4.9, 0.5, 24, STONE_TRIM, 0, 13.9, -13);
+  b.add(new SphereGeometry(4.6, 24, 8, 0, Math.PI * 2, 0, Math.PI / 2), DOME, place(0, 14.1, -13));
+  b.cylinder(0.9, 1.1, 1.4, 10, STONE_TRIM, 0, 19.3, -13);
+  b.ball(0.5, BRASS, 0, 20.4, -13);
+
+  // Bunting strung between the columns, hooked to each shaft below the marquee.
+  for (let c = 0; c < COLUMNS.length - 1; c++) {
+    const a = new Vector3(COLUMNS[c] + 0.55, 6.95, COLUMN_Z + 0.3);
+    const z = new Vector3(COLUMNS[c + 1] - 0.55, 6.95, COLUMN_Z + 0.3);
+    const string = catenary(a, z, 0.45, 12);
+    b.tube(string, 0.025, PLUM, 16);
+    const flags = Math.max(3, Math.round(a.distanceTo(z) / 0.62));
+    for (let i = 1; i < flags; i++) {
+      const u = i / flags;
+      const p = catenary(a, z, 0.45, 60)[Math.round(u * 60)];
+      b.add(pennant(0.44, 0.62), BRIGHTS[(c * 3 + i) % BRIGHTS.length], place(p.x, p.y, p.z));
+    }
+  }
 }
 
-function plaza() {
-  const b = new Batch();
+/**
+ * The plaza: the ground, the paving, the road and kerbs, the carpet running
+ * up every step, brass stanchions with velvet ropes, palms in planters, the
+ * balloon arch, potted shrubs and balloon bunches.
+ * @param {Batch} b @param {Shadows} shadows
+ */
+function plaza(b, shadows) {
   // Ground all the way to the horizon, then the plaza, road and pavements on it.
-  b.add(new CylinderGeometry(200, 200, 0.2, 24), '#8E8270', place(0, -0.3, 0));
-  b.box(150, 0.2, 54, PAVING, 0, -0.1, -6);
-  for (let z = 0; z < KERB_Z; z += 3) b.box(60, 0.04, 0.1, '#C4B38F', 0, 0.02, z);
-  b.box(200, 0.2, 7.6, ROAD, 0, -0.08, ROAD_Z + 1.9);
-  b.box(200, 0.35, 0.4, '#BDB4A6', 0, 0.05, KERB_Z);
-  b.box(200, 0.35, 0.4, '#BDB4A6', 0, 0.05, ROAD_Z + 5.7);
-  for (let x = -90; x < 90; x += 4.4) b.box(2.2, 0.04, 0.18, YELLOW, x, 0.04, ROAD_Z + 1.9);
-  b.box(200, 0.2, 60, '#D9CDB0', 0, -0.06, ROAD_Z + 36);
+  b.add(new CylinderGeometry(200, 200, 0.2, 24), GROUND, place(0, -0.3, 0), false);
+  b.add(new BoxGeometry(150, 0.2, 54), PAVING, place(0, -0.1, -6), false);
+  for (let z = 0; z < KERB_Z; z += 3) b.add(new BoxGeometry(60, 0.02, 0.08), PAVING_LINE, place(0, 0.01, z), false);
+  for (let x = -27; x <= 27; x += 3)
+    b.add(new BoxGeometry(0.08, 0.02, KERB_Z - 2.8), PAVING_LINE, place(x, 0.011, (KERB_Z + 2.8) / 2), false);
+  b.add(new BoxGeometry(200, 0.2, 7.6), ROAD, place(0, -0.08, ROAD_Z + 1.9), false);
+  b.box(200, 0.35, 0.4, KERB, 0, 0.05, KERB_Z);
+  b.box(200, 0.35, 0.4, KERB, 0, 0.05, ROAD_Z + 5.7);
+  for (let x = -90; x < 90; x += 4.4)
+    b.add(new BoxGeometry(2.2, 0.03, 0.18), BUTTER, place(x, 0.04, ROAD_Z + 1.9), false);
+  b.add(new BoxGeometry(200, 0.2, 60), '#E3D3B8', place(0, -0.06, ROAD_Z + 36), false);
 
-  // Red carpet from the kerb, up the steps, to the door. It sits on top of
-  // each tread and stands just proud of each riser, so nothing is coplanar.
-  b.box(3, 0.06, KERB_Z - 0.2 - 3.0, CARPET, 0, 0.04, (KERB_Z - 0.2 + 3.0) / 2);
+  // The carpet, from the kerb up every step to the door: flat on each tread,
+  // down each riser, and flat across the portico, with brass edging on the plaza.
+  b.add(new BoxGeometry(3, 0.06, KERB_Z - 0.2 - 3.6), CARPET, place(0, 0.04, (KERB_Z - 0.2 + 3.6) / 2), false);
+  for (const sx of [-1, 1])
+    b.add(
+      new BoxGeometry(0.1, 0.07, KERB_Z - 0.2 - 3.6),
+      BRASS,
+      place(sx * 1.52, 0.045, (KERB_Z - 0.2 + 3.6) / 2),
+      false,
+    );
   for (let i = 0; i < 8; i++) {
     const h = 2.2 - i * 0.275;
-    b.box(3, 0.05, 0.62, CARPET, 0, h + 0.03, -0.55 + i * 0.55 + 0.02);
+    const front = -0.25 + i * 0.55;
+    const below = i < 7 ? 2.2 - (i + 1) * 0.275 : 0;
+    // The tread: from this step's back edge (the riser above) to its nose.
+    b.add(new BoxGeometry(3, 0.04, 0.57), CARPET, place(0, h + 0.02, front - 0.27), false);
+    // The riser: down the front of the step to the tread below.
+    b.add(new BoxGeometry(3, h - below + 0.04, 0.04), CARPET, place(0, (h + below) / 2, front + 0.02), false);
   }
-  b.box(3, 0.05, 5.6, CARPET, 0, 2.23, -3.6);
+  b.add(new BoxGeometry(3, 0.04, 5.5), CARPET, place(0, 2.22, -3.55), false);
 
-  // Brass stanchions with velvet ropes on both sides of the carpet.
+  // Brass stanchions down both sides of the carpet: a weighted base on the
+  // plaza, a post, a ball on top, and velvet ropes hooked to the balls.
   for (const sx of [-1, 1]) {
     /** @type {Vector3[]} */
     const tops = [];
-    for (let z = 3.6; z <= KERB_Z - 0.6; z += 2.2) {
+    for (let z = 3.9; z <= KERB_Z - 0.6; z += 2.2) {
       const x = sx * 2.3;
-      b.cylinder(0.28, 0.36, 0.12, 8, GOLD, x, 0.08, z);
-      b.cylinder(0.08, 0.08, 1.2, 6, GOLD, x, 0.7, z);
-      b.add(new IcosahedronGeometry(0.16, 0), GOLD, place(x, 1.34, z));
-      tops.push(new Vector3(x, 1.26, z));
+      b.cylinder(0.3, 0.34, 0.08, 12, BRASS, x, 0.04, z);
+      b.ball(0.2, BRASS, x, 0.08, z, [1, 0.45, 1], 8);
+      b.cylinder(0.055, 0.065, 1.1, 8, BRASS, x, 0.68, z);
+      b.ball(0.13, BRASS, x, 1.28, z, [1, 1, 1], 8);
+      tops.push(new Vector3(x, 1.2, z));
+      shadows.add(x, z, 0.9, 0.9);
     }
     for (let i = 0; i < tops.length - 1; i++) {
-      const a = tops[i];
-      const c = tops[i + 1];
-      const mid = a.clone().lerp(c, 0.5);
-      mid.y -= 0.32;
-      b.add(new TubeGeometry(new CatmullRomCurve3([a, mid, c]), 8, 0.09, 6, false), '#8C1730');
+      const a = tops[i].clone().add(new Vector3(0, 0, 0.11));
+      const c = tops[i + 1].clone().add(new Vector3(0, 0, -0.11));
+      b.tube(catenary(a, c, 0.36, 12), 0.07, ROPE, 14);
+      // The hooks at both ends.
+      b.add(new TorusGeometry(0.06, 0.02, 4, 8), BRASS, place(a.x, a.y, a.z, 0, 0, Math.PI / 2));
+      b.add(new TorusGeometry(0.06, 0.02, 4, 8), BRASS, place(c.x, c.y, c.z, 0, 0, Math.PI / 2));
     }
   }
 
-  // A balloon arch over the carpet where it meets the kerb.
+  // A balloon arch over the carpet where it meets the kerb, standing on two weights.
+  const archZ = KERB_Z - 1.1;
+  for (const sx of [-1, 1]) {
+    b.box(0.7, 0.3, 0.7, LILAC_MID, sx * 3.6, 0.15, archZ);
+    shadows.add(sx * 3.6, archZ, 1.4, 1.4);
+  }
   for (let i = 0; i <= 26; i++) {
     const a = (i / 26) * Math.PI;
-    b.add(
-      new IcosahedronGeometry(0.42, 1),
-      BRIGHTS[i % BRIGHTS.length],
-      place(Math.cos(a) * 3.6, 0.3 + Math.sin(a) * 5.2, KERB_Z - 1.1),
-    );
+    b.ball(0.43, BRIGHTS[i % BRIGHTS.length], Math.cos(a) * 3.6, 0.72 + Math.sin(a) * 5.0, archZ, [1, 1.08, 1], 9);
   }
 
-  // Planters with palms at the corners of the carpet.
-  for (const [x, z] of [
-    [-5.5, 2.5],
-    [5.5, 2.5],
-    [-5.5, KERB_Z - 1],
-    [5.5, KERB_Z - 1],
+  // Palms in round planters at the corners of the carpet, trunks curving up
+  // out of the soil, fronds arching over.
+  PALMS.forEach(([x, z], i) => palm(b, shadows, x, z, i));
+
+  // Potted shrubs either side of the bottom step and on the portico.
+  for (const [x, z, y] of [
+    [-3.4, 4.2, 0],
+    [3.4, 4.2, 0],
+    [-4.6, -2.2, 2.2],
+    [4.6, -2.2, 2.2],
   ]) {
-    b.box(1.6, 0.9, 1.6, STONE_SHADE, x, 0.45, z);
-    b.cylinder(0.16, 0.22, 3.6, 6, '#8A5A2B', x, 2.6, z);
-    for (let k = 0; k < 6; k++) {
-      const a = (k / 6) * Math.PI * 2 + x;
-      b.add(
-        new BoxGeometry(2.4, 0.08, 0.55),
-        GREEN,
-        place(x + Math.cos(a) * 1.0, 4.35, z + Math.sin(a) * 1.0, -a, 0, -0.45),
+    pottedShrub(b, x, z, y);
+    if (y === 0) shadows.add(x, z, 1.4, 1.4);
+  }
+
+  // Bunches of balloons tied to the kerb-end stanchions.
+  for (const sx of [-1, 1]) {
+    const anchor = new Vector3(sx * 2.3, 1.28, KERB_Z - 0.6 - ((KERB_Z - 0.6 - 3.9) % 2.2));
+    [
+      [0.35, 2.9, 0.1, ROSE],
+      [-0.25, 3.15, -0.2, SKY],
+      [0.05, 3.45, 0.25, BUTTER],
+    ].forEach(([dx, dy, dz, color]) => {
+      const top = new Vector3(
+        anchor.x + sx * /** @type {number} */ (dx),
+        /** @type {number} */ (dy),
+        anchor.z + /** @type {number} */ (dz),
       );
+      b.ball(0.36, /** @type {string} */ (color), top.x, top.y, top.z, [1, 1.18, 1], 12);
+      b.add(
+        new ConeGeometry(0.07, 0.1, 6),
+        /** @type {string} */ (color),
+        place(top.x, top.y - 0.46, top.z, 0, Math.PI),
+      );
+      b.tube(
+        [
+          top.clone().setY(top.y - 0.5),
+          anchor
+            .clone()
+            .lerp(top, 0.4)
+            .setY(anchor.y + 0.9),
+          anchor,
+        ],
+        0.012,
+        PLUM,
+        10,
+      );
+    });
+  }
+}
+
+/**
+ * A palm in a round planter: soil, a trunk that curves up in ringed segments,
+ * coconuts and fronds that arch out and droop.
+ * @param {Batch} b @param {Shadows} shadows @param {number} x @param {number} z @param {number} seed
+ */
+function palm(b, shadows, x, z, seed) {
+  b.cylinder(0.85, 0.7, 0.9, 16, PEACH_MID, x, 0.45, z);
+  b.add(new TorusGeometry(0.85, 0.08, 6, 20), PEACH, place(x, 0.9, z, 0, Math.PI / 2));
+  b.cylinder(0.78, 0.78, 0.06, 16, COCOA, x, 0.86, z);
+  shadows.add(x, z, 2.2, 2.2);
+  // The trunk: from inside the soil, leaning and curving a little.
+  const lean = new Vector3(Math.sin(seed * 2.3) * 0.5, 0, Math.cos(seed * 1.7) * 0.4);
+  const points = Array.from({ length: 8 }, (_, k) => {
+    const u = k / 7;
+    return new Vector3(x + lean.x * u * u, 0.8 + u * 3.8, z + lean.z * u * u);
+  });
+  for (let k = 0; k < points.length - 1; k++) {
+    const r = 0.2 - k * 0.012;
+    b.pole(points[k], points[k + 1], r, k % 2 ? WOOD : WOOD_DARK, 8);
+    b.add(
+      new TorusGeometry(r + 0.01, 0.025, 4, 10),
+      WOOD_DARK,
+      place(points[k + 1].x, points[k + 1].y, points[k + 1].z, 0, Math.PI / 2),
+      false,
+    );
+  }
+  const crown = points[points.length - 1];
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2;
+    b.ball(0.14, COCOA, crown.x + Math.cos(a) * 0.18, crown.y - 0.12, crown.z + Math.sin(a) * 0.18, [1, 1, 1], 8);
+  }
+  // Fronds: segments of leaf along an arching curve, widest in the middle.
+  for (let f = 0; f < 7; f++) {
+    const a = (f / 7) * Math.PI * 2 + seed;
+    const reach = 1.9 + 0.3 * Math.sin(f * 1.7 + seed);
+    const lift = 0.5 + 0.2 * Math.cos(f * 2.1);
+    const dir = new Vector3(Math.cos(a), 0, Math.sin(a));
+    let prev = crown.clone();
+    const n = 5;
+    for (let k = 1; k <= n; k++) {
+      const u = k / n;
+      const p = crown
+        .clone()
+        .addScaledVector(dir, reach * u)
+        .add(new Vector3(0, lift * Math.sin(u * Math.PI * 0.7) - 1.2 * u * u, 0));
+      const mid = prev.clone().lerp(p, 0.5);
+      const len = prev.distanceTo(p);
+      const width = 0.12 + 0.34 * Math.sin(u * Math.PI);
+      const m = new Matrix4().lookAt(prev, p, new Vector3(0, 1, 0));
+      m.setPosition(mid);
+      for (const side of [-1, 1]) {
+        // Long, narrow leaflets swept forward along the frond, overlapping the next pair.
+        const leaf = new BoxGeometry(width * 0.55, 0.03, len * 1.35)
+          .translate((side * width * 0.5) / 2, 0, len * 0.25)
+          .rotateY(side * 0.6)
+          .rotateZ(side * 0.32);
+        b.add(leaf, side < 0 ? MINT_MID : MINT_DEEP, m);
+      }
+      prev = p;
     }
   }
-  return b.mesh();
+}
+
+/** A round pot with a bushy shrub of three clumps. @param {Batch} b @param {number} x @param {number} z @param {number} y */
+function pottedShrub(b, x, z, y) {
+  b.cylinder(0.45, 0.34, 0.6, 14, LILAC_MID, x, y + 0.3, z);
+  b.add(new TorusGeometry(0.45, 0.05, 6, 16), LILAC, place(x, y + 0.6, z, 0, Math.PI / 2));
+  b.cylinder(0.42, 0.42, 0.05, 14, COCOA, x, y + 0.57, z);
+  b.ball(0.5, MINT_MID, x, y + 1.0, z, [1, 0.9, 1], 10);
+  b.ball(0.36, MINT_DEEP, x + 0.25, y + 1.25, z + 0.1, [1, 1, 1], 10);
+  b.ball(0.32, MINT, x - 0.2, y + 1.3, z - 0.15, [1, 1, 1], 10);
 }
 
 /**
  * The west side: Robson Square's stepped terraces with trees, a round
  * fountain and a row of brand activation tents.
- * @param {() => number} random
+ * @param {Batch} b @param {Shadows} shadows @param {() => number} random
  */
-function robsonSquare(random) {
-  const b = new Batch();
+function robsonSquare(b, shadows, random) {
   // Terraces stepping up and away.
   for (let k = 0; k < 4; k++) {
     const x = -30 - k * 5;
     const h = 0.9 + k * 1.1;
-    b.box(5, h, 30, k % 2 ? '#D3C3A0' : STONE_SHADE, x, h / 2, 6);
-    b.box(4.2, 0.2, 29, '#4A9440', x, h + 0.1, 6);
+    b.box(5, h, 30, k % 2 ? '#E8D7BC' : STONE_SHADE, x, h / 2, 6);
+    b.box(4.2, 0.2, 29, MINT_MID, x, h + 0.1, 6);
     for (let z = -8; z <= 20; z += 7)
-      b.tree(x + (random() - 0.5), z + random() * 2, 2.2 + random(), 1.4 + random() * 0.6);
+      b.tree(x + (random() - 0.5), z + random() * 2, 2.2 + random(), 1.3 + random() * 0.5);
   }
-  // The fountain.
-  b.cylinder(3.4, 3.6, 0.8, 18, STONE, -16, 0.4, 5);
-  b.cylinder(3.0, 3.0, 0.1, 18, '#5FA8E8', -16, 0.75, 5);
-  b.cylinder(0.5, 0.7, 1.4, 8, STONE, -16, 1.4, 5);
+  // The fountain: a stone basin, water, and arcs of spray from the middle.
+  b.cylinder(3.4, 3.6, 0.8, 24, STONE, -16, 0.4, 5);
+  b.add(new TorusGeometry(3.4, 0.14, 6, 28), STONE_TRIM, place(-16, 0.8, 5, 0, Math.PI / 2));
+  b.cylinder(3.15, 3.15, 0.1, 24, SKY, -16, 0.75, 5);
+  b.cylinder(0.5, 0.7, 1.4, 12, STONE, -16, 1.4, 5);
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * Math.PI * 2;
-    b.pole(new Vector3(-16, 2.0, 5), new Vector3(-16 + Math.cos(a) * 2.2, 0.8, 5 + Math.sin(a) * 2.2), 0.1, '#BFE3FF');
+    const end = new Vector3(-16 + Math.cos(a) * 2.2, 0.8, 5 + Math.sin(a) * 2.2);
+    b.tube(
+      [new Vector3(-16, 2.1, 5), new Vector3(-16 + Math.cos(a) * 1.3, 2.6, 5 + Math.sin(a) * 1.3), end],
+      0.08,
+      '#E6F1FF',
+      10,
+    );
   }
-  b.cylinder(0.14, 0.14, 2.4, 6, '#BFE3FF', -16, 3.2, 5);
-  // Activation tents with striped roofs.
+  b.cylinder(0.12, 0.12, 2.4, 8, '#E6F1FF', -16, 3.2, 5);
+  shadows.add(-16, 5, 8.4, 8.4);
+  // Activation tents with peaked roofs and a sign on each.
   [
-    [-12, 19, RED],
-    [-19, 16, BLUE],
-    [-24, 10.5, PURPLE],
+    [-12, 19, ROSE_MID],
+    [-19, 16, SKY_MID],
+    [-24, 10.5, LILAC_MID],
   ].forEach(([x, z, color], i) => {
     const xx = /** @type {number} */ (x);
     const zz = /** @type {number} */ (z);
-    b.box(4.2, 2.4, 4.2, '#FFF7E6', xx, 1.2, zz, i * 0.4);
+    b.box(4.2, 2.4, 4.2, PAPER, xx, 1.2, zz, i * 0.4);
     b.add(new ConeGeometry(3.4, 2.2, 4), /** @type {string} */ (color), place(xx, 3.5, zz, i * 0.4 + Math.PI / 4));
-    b.box(2.2, 0.8, 0.12, YELLOW, xx, 1.8, zz + 2.12, i * 0.4);
+    b.box(2.2, 0.8, 0.12, BUTTER, xx + Math.sin(i * 0.4) * 2.12, 1.8, zz + Math.cos(i * 0.4) * 2.12, i * 0.4);
+    shadows.add(xx, zz, 6.2, 6.2, 0.012, i * 0.4);
   });
-  return b.mesh();
 }
 
-/** The east side: the step-and-repeat wall, the projector tower, the big screen's truss and a food truck. */
-function eastSide() {
-  const b = new Batch();
-  // Projector tower beside the gallery: a scaffold, a platform and the
-  // projector, aimed across the east side at the screen.
+/**
+ * The east side: the step-and-repeat wall with a director's chair and a
+ * clapperboard, the projector tower, the big screen's truss and a food truck.
+ * @param {Batch} b @param {Shadows} shadows
+ */
+function eastSide(b, shadows) {
+  // Projector tower beside the gallery: a scaffold on foot plates, a platform
+  // and the projector, aimed across the east side at the screen.
   const P = PROJECTOR;
   for (const [dx, dz] of [
     [-1, -1],
@@ -629,104 +1045,139 @@ function eastSide() {
     [1, 1],
     [-1, 1],
   ]) {
-    b.cylinder(0.1, 0.1, 5.4, 6, '#9AA0B5', P.x + dx, 2.7, P.z + dz);
+    b.box(0.4, 0.06, 0.4, METAL, P.x + dx, 0.03, P.z + dz);
+    b.cylinder(0.1, 0.1, 5.3, 8, METAL, P.x + dx, 2.7, P.z + dz);
   }
   for (const y of [1.8, 3.6]) {
-    b.pole(new Vector3(P.x - 1, y, P.z - 1), new Vector3(P.x + 1, y + 1.2, P.z + 1), 0.06, '#9AA0B5');
-    b.pole(new Vector3(P.x + 1, y, P.z - 1), new Vector3(P.x - 1, y + 1.2, P.z + 1), 0.06, '#9AA0B5');
+    b.pole(new Vector3(P.x - 1, y, P.z - 1), new Vector3(P.x + 1, y + 1.2, P.z + 1), 0.06, METAL);
+    b.pole(new Vector3(P.x + 1, y, P.z - 1), new Vector3(P.x - 1, y + 1.2, P.z + 1), 0.06, METAL);
   }
-  b.box(2.6, 0.25, 2.6, INK, P.x, 5.45, P.z);
+  b.box(2.6, 0.25, 2.6, PLUM, P.x, 5.45, P.z);
   const lens = projectorLens();
   const aim = SCREEN.clone().sub(lens).setY(0).normalize();
-  b.box(1.4, 0.9, 1.8, PURPLE, P.x, 6.0, P.z, Math.atan2(aim.x, aim.z));
-  b.pole(lens.clone().addScaledVector(aim, -0.3), lens.clone().addScaledVector(aim, 0.1), 0.36, INK);
-  // Step-and-repeat photo wall beside the carpet, facing it.
-  b.box(0.3, 3.4, 7, '#FFFDF5', 6.4, 1.9, 7.5);
+  b.box(1.4, 0.9, 1.8, LILAC_MID, P.x, 6.0, P.z, Math.atan2(aim.x, aim.z));
+  b.pole(lens.clone().addScaledVector(aim, -0.3), lens.clone().addScaledVector(aim, 0.1), 0.36, PLUM, 12);
+  shadows.add(P.x, P.z, 3.4, 3.4);
+  // Step-and-repeat photo wall beside the carpet, facing it, on two feet.
+  b.box(0.3, 3.4, 7, PAPER, 6.4, 1.95, 7.5);
   for (let r = 0; r < 4; r++) {
     for (let c = 0; c < 8; c++) {
-      b.box(
-        0.08,
-        0.5,
-        0.5,
-        BRIGHTS[(r * 3 + c) % BRIGHTS.length],
-        6.17,
-        0.8 + r * 0.75,
-        4.6 + c * 0.82 + (r % 2) * 0.41,
-      );
+      b.box(0.06, 0.48, 0.48, MIDS[(r * 3 + c) % MIDS.length], 6.22, 0.85 + r * 0.75, 4.6 + c * 0.82 + (r % 2) * 0.41);
     }
   }
-  b.cylinder(0.08, 0.08, 3.6, 6, INK, 6.5, 1.8, 4.0);
-  b.cylinder(0.08, 0.08, 3.6, 6, INK, 6.5, 1.8, 11.0);
-  // The big screen's truss: two towers and a header.
+  for (const wz of [4.0, 11.0]) {
+    b.cylinder(0.08, 0.08, 3.7, 8, PLUM, 6.5, 1.85, wz);
+    b.box(1.2, 0.08, 0.3, PLUM, 6.5, 0.04, wz);
+  }
+  shadows.add(6.4, 7.5, 1.8, 7.8);
+  directorsChair(b, shadows, CHAIR);
+  // The big screen's truss: two towers on foot plates and a header.
   for (const z of [2.2, 19.8]) {
+    b.box(1.6, 0.08, 1.6, METAL, 25, 0.04, z);
     for (const dx of [-0.5, 0.5]) {
-      for (const dz of [-0.5, 0.5]) b.cylinder(0.08, 0.08, 13.5, 6, '#9AA0B5', 25 + dx, 6.75, z + dz);
+      for (const dz of [-0.5, 0.5]) b.cylinder(0.08, 0.08, 13.5, 6, METAL, 25 + dx, 6.75, z + dz);
     }
     for (let y = 1; y < 13; y += 1.5)
-      b.pole(new Vector3(24.5, y, z - 0.5), new Vector3(25.5, y + 1.5, z + 0.5), 0.05, '#9AA0B5');
+      b.pole(new Vector3(24.5, y, z - 0.5), new Vector3(25.5, y + 1.5, z + 0.5), 0.05, METAL);
+    shadows.add(25, z, 2.2, 2.2);
   }
-  b.box(1.2, 1.0, 18.6, '#9AA0B5', 25, 13.4, 11);
-  b.box(0.5, 9.6, 16.6, INK, 25.35, 7.4, 11);
-  // A food truck.
-  b.box(6.5, 2.8, 2.6, YELLOW, 17, 1.9, 23.6 - 6, Math.PI / 2);
-  b.box(6.5, 0.5, 2.7, RED, 17, 3.45, 23.6 - 6, Math.PI / 2);
-  b.box(0.1, 1.0, 3.2, '#2B2F5E', 15.68, 2.2, 17.6);
-  b.box(0.3, 0.12, 3.6, RED, 15.4, 2.85, 17.6);
-  for (const dz of [-2.2, 2.2])
-    b.add(new CylinderGeometry(0.5, 0.5, 2.8, 10), INK, place(17, 0.5, 17.6 + dz, 0, 0, Math.PI / 2));
+  b.box(1.2, 1.0, 18.6, METAL, 25, 13.4, 11);
+  // The screen's bezel, framing the picture (the picture itself is adScreen).
+  b.box(0.5, 9.8, 16.8, PLUM, 25.35, 7.4, 11);
+  // A food truck on its wheels, with an awning over the hatch.
+  const ty = 17.6;
+  b.box(6.5, 2.6, 2.6, BUTTER, 17, 2.0, ty, Math.PI / 2);
+  b.box(6.6, 0.5, 2.7, ROSE_MID, 17, 3.5, ty, Math.PI / 2);
+  b.box(0.1, 1.0, 3.2, DUSK, 15.68, 2.3, ty);
+  b.box(0.8, 0.08, 3.6, ROSE, 15.3, 3.0, ty);
+  for (const dz of [-2.2, 2.2]) {
+    b.add(new CylinderGeometry(0.5, 0.5, 2.8, 14), PLUM, place(17, 0.5, ty + dz, 0, 0, Math.PI / 2));
+    b.add(new CylinderGeometry(0.22, 0.22, 2.84, 10), LILAC, place(17, 0.5, ty + dz, 0, 0, Math.PI / 2), false);
+  }
+  shadows.add(17, ty, 3.6, 7.4);
   // Trees along the east edge.
-  for (let z = -2; z <= 20; z += 5.5) b.tree(31, z, 2.8, 1.7);
-  return b.mesh();
+  for (let z = -2; z <= 20; z += 5.5) {
+    b.tree(31, z, 2.8, 1.6);
+    shadows.add(31, z, 2.6, 2.6);
+  }
+}
+
+/**
+ * A director's chair on the plaza by the photo wall, a clapperboard leaning
+ * against it.
+ * @param {Batch} b @param {Shadows} shadows @param {Vector3} at
+ */
+function directorsChair(b, shadows, at) {
+  const ry = -0.9;
+  const local = (/** @type {number} */ x, /** @type {number} */ y, /** @type {number} */ z) =>
+    new Vector3(x, y, z).applyAxisAngle(new Vector3(0, 1, 0), ry).add(at);
+  // Crossed legs either side, armrests and back posts.
+  for (const sx of [-1, 1]) {
+    b.pole(local(sx * 0.32, 0, -0.28), local(sx * 0.32, 0.62, 0.28), 0.035, WOOD);
+    b.pole(local(sx * 0.32, 0, 0.28), local(sx * 0.32, 0.62, -0.28), 0.035, WOOD);
+    b.pole(local(sx * 0.32, 0.62, -0.3), local(sx * 0.32, 1.25, -0.32), 0.035, WOOD);
+    b.pole(local(sx * 0.32, 0.86, -0.3), local(sx * 0.32, 0.86, 0.3), 0.03, WOOD);
+  }
+  // Canvas seat and back.
+  const seat = local(0, 0.62, 0);
+  b.add(new BoxGeometry(0.66, 0.04, 0.56), LILAC_MID, place(seat.x, seat.y, seat.z, ry));
+  const back = local(0, 1.08, -0.32);
+  b.add(new BoxGeometry(0.66, 0.3, 0.04), LILAC_MID, place(back.x, back.y, back.z, ry));
+  // The clapperboard, leaning on the chair's front legs.
+  const slate = local(0.05, 0.27, 0.42);
+  b.add(new BoxGeometry(0.5, 0.36, 0.04), DUSK, place(slate.x, slate.y, slate.z, ry, -0.25));
+  b.add(new BoxGeometry(0.5, 0.08, 0.05), PAPER, place(slate.x, slate.y + 0.22, slate.z - 0.06, ry, -0.25));
+  for (let k = 0; k < 4; k++) {
+    const s = local(-0.18 + k * 0.12, 0.49, 0.36);
+    b.add(new BoxGeometry(0.05, 0.085, 0.055), INK, place(s.x, s.y, s.z, ry + 0.4, -0.25), false);
+  }
+  shadows.add(at.x, at.z, 1.3, 1.2, 0.012, ry);
 }
 
 /**
  * The south side of the street: a row of shops with lit windows, awnings and
- * signs, and the hotel tower with its green copper roof.
- * @param {() => number} random
+ * signs, and the hotel tower with its copper roof.
+ * @param {Batch} b @param {() => number} random
  */
-function acrossTheStreet(random) {
-  const b = new Batch();
+function acrossTheStreet(b, random) {
   const z0 = ROAD_Z + 7;
   let x = -70;
   let i = 0;
   while (x < 70) {
     const w = 7 + random() * 6;
     const h = 7 + random() * 12;
-    const color = ['#7B5E9E', '#C9776A', '#5E7FB8', '#B58A5A', '#6A9E7A'][i % 5];
+    const color = ['#C9B6DE', '#F2C3B5', '#B9CFEA', '#EED7AE', '#BFDCC8'][i % 5];
     b.box(w - 0.4, h, 8, color, x + w / 2, h / 2, z0 + 4);
+    b.box(w - 0.2, 0.4, 8.4, STONE_TRIM, x + w / 2, h + 0.2, z0 + 4);
     for (let y = 3.5; y < h - 1.5; y += 3) {
       for (let k = 0; k < Math.floor(w / 2.4); k++) {
-        if (random() > 0.3) b.box(1.1, 1.4, 0.3, WINDOW, x + 1.4 + k * 2.4, y, z0 - 0.05);
+        if (random() > 0.3) b.detail(1.1, 1.4, 0.3, WINDOW, x + 1.4 + k * 2.4, y, z0 - 0.05);
       }
     }
-    b.box(w - 1.4, 1.8, 0.3, '#FFE7A8', x + w / 2, 1.2, z0 - 0.05);
-    b.box(w - 1, 0.25, 1.4, BRIGHTS[i % BRIGHTS.length], x + w / 2, 2.55, z0 - 0.7);
+    b.box(w - 1.4, 1.8, 0.3, '#FFEBC2', x + w / 2, 1.2, z0 - 0.05);
+    b.box(w - 1, 0.25, 1.4, MIDS[i % MIDS.length], x + w / 2, 2.55, z0 - 0.7);
     x += w;
     i++;
   }
   // The hotel: a tall block with a pitched copper roof.
-  b.box(16, 34, 14, '#B9A27E', 24, 17, z0 + 22);
-  b.add(new ConeGeometry(11.5, 9, 4), '#5FAE92', place(24, 38.5, z0 + 22, Math.PI / 4));
+  b.box(16, 34, 14, '#E6D2B6', 24, 17, z0 + 22);
+  b.add(new ConeGeometry(11.5, 9, 4), MINT_DEEP, place(24, 38.5, z0 + 22, Math.PI / 4));
   for (let y = 4; y < 33; y += 3.2) {
-    for (let k = 0; k < 5; k++) if (random() > 0.35) b.box(1.2, 1.5, 0.3, WINDOW, 18.5 + k * 2.8, y, z0 + 14.9);
+    for (let k = 0; k < 5; k++) if (random() > 0.35) b.detail(1.2, 1.5, 0.3, WINDOW, 18.5 + k * 2.8, y, z0 + 14.9);
   }
   // Street trees on both pavements.
   for (let tx = -60; tx <= 60; tx += 9) {
-    if (Math.abs(tx) > 6) b.tree(tx + 2, KERB_Z - 0.9, 2.6, 1.3);
-    b.tree(tx - 2, ROAD_Z + 6.4, 2.6, 1.3);
+    if (Math.abs(tx) > 6) b.tree(tx + 2, KERB_Z - 0.9, 2.6, 1.2);
+    b.tree(tx - 2, ROAD_Z + 6.4, 2.6, 1.2);
   }
-  return b.mesh();
 }
 
 /**
  * City towers in a ring all round, with lit windows facing the viewer (left
  * off on lighter devices: they are most of the triangles and far away).
- * @param {() => number} random
- * @param {number} count
- * @param {boolean} windows
+ * @param {Batch} b @param {() => number} random @param {number} count @param {boolean} windows
  */
-function skyline(random, count, windows) {
-  const b = new Batch();
+function skyline(b, random, count, windows) {
   for (let i = 0; i < count; i++) {
     const a = (i / count) * Math.PI * 2 + random() * 0.08;
     // Leave the view north, over the gallery, to the mountains.
@@ -737,7 +1188,7 @@ function skyline(random, count, windows) {
     const h = 16 + random() * 42;
     const w = 7 + random() * 8;
     const ry = -a;
-    b.box(w, h, w, i % 3 ? '#3A3F7A' : '#4B3F86', px, h / 2, pz, ry);
+    b.box(w, h, w, ['#A39FCB', '#B3A8D2', '#9A98C6'][i % 3], px, h / 2, pz, ry);
     // Windows on the face toward the viewer.
     const fx = -Math.sin(a);
     const fz = Math.cos(a);
@@ -746,7 +1197,7 @@ function skyline(random, count, windows) {
     for (let y = 3; y < h - 2; y += 3.4) {
       for (let k = -1; k <= 1; k++) {
         if (random() > 0.45 && windows) {
-          b.box(
+          b.detail(
             1.1,
             1.4,
             0.4,
@@ -760,13 +1211,12 @@ function skyline(random, count, windows) {
       }
     }
   }
-  return b.mesh();
 }
 
 /**
- * An unlit material for light sources (the marquee, camera flashes): full
- * colour, warmed toward white, no crayon strokes and no outline. Works on
- * plain and instanced meshes.
+ * An unlit material for light sources (the marquee, camera flashes,
+ * sparkles): full colour, warmed toward white, no crayon strokes and no
+ * outline. Works on plain and instanced meshes.
  */
 export function glowMaterial() {
   return new ShaderMaterial({
@@ -795,27 +1245,42 @@ export function glowMaterial() {
   });
 }
 
+/** The marquee letters' warm, soft yellow. */
+export const MARQUEE_YELLOW = '#FFDFA0';
+
 /**
- * SANDBOX in marquee lights on an ink-black board across the front of the
- * portico: solid, touching letter pixels that glow warm yellow, bulbs on top
- * with a soft travelling sparkle, and a chaser border that fades rather than
- * blinks. The letters themselves never dim, so the word always reads.
+ * SANDBOX in marquee lights on a plum board across the front of the portico,
+ * in a rounded brass frame, bolted to the entablature above and braced back
+ * to the columns: solid, touching letter pixels that glow a soft warm yellow,
+ * bulbs on top with a travelling sparkle, and a chaser border that fades
+ * rather than blinks. The letters themselves never dim, so the word reads.
+ * The board and frame go into the scenery batch `b`; the lights are their own.
+ * @param {Batch} b
  */
-function marqueeSign() {
+function marqueeSign(b) {
   const group = new Group();
-  const b = new Batch();
   const W = 13.4;
   const H = 3.3;
   const y = 9.3;
   const z = 0.0;
-  b.box(W, H, 0.5, INK, 0, y, z);
-  b.box(W + 0.7, 0.4, 0.7, GOLD, 0, y + H / 2, z);
-  b.box(W + 0.7, 0.4, 0.7, GOLD, 0, y - H / 2, z);
+  b.box(W, H, 0.5, DUSK, 0, y, z);
+  // The frame: rails round the board, rounded posts at the corners.
+  b.box(W + 0.4, 0.38, 0.7, BRASS, 0, y + H / 2 + 0.05, z);
+  b.box(W + 0.4, 0.38, 0.7, BRASS, 0, y - H / 2 - 0.05, z);
   for (const sx of [-1, 1]) {
-    b.box(0.4, H + 0.4, 0.7, GOLD, (sx * (W + 0.3)) / 2, y, z);
-    b.box(0.3, 0.3, 1.6, INK, sx * (W / 2 - 1.5), y - 0.6, z - 0.9);
+    b.box(0.38, H + 0.4, 0.7, BRASS, (sx * (W + 0.3)) / 2, y, z);
+    for (const sy of [-1, 1]) b.ball(0.32, BUTTER, (sx * (W + 0.3)) / 2, y + (sy * (H + 0.1)) / 2, z, [1, 1, 1], 10);
+    // Braces back to the columns behind it, and hangers up to the entablature.
+    b.box(0.26, 0.26, 1.7, PLUM, sx * (W / 2 - 1.5), y - 0.6, z - 1.05);
+    b.add(new BoxGeometry(0.42, 0.42, 0.08), BRASS, place(sx * (W / 2 - 1.5), y - 0.6, z - 1.9));
+    b.pole(
+      new Vector3(sx * (W / 2 - 1.2), y + H / 2 + 0.2, z - 0.1),
+      new Vector3(sx * (W / 2 - 1.2), 10.95, -1.15),
+      0.06,
+      PLUM,
+    );
+    b.box(0.5, 0.12, 0.3, BRASS, sx * (W / 2 - 1.2), 10.95, -1.1);
   }
-  group.add(b.mesh());
 
   const spacing = 0.3;
   const pixels = bulbLayout('SANDBOX').map((p) => ({
@@ -824,9 +1289,9 @@ function marqueeSign() {
     column: Math.round(p.x),
   }));
   const letters = new InstancedMesh(new BoxGeometry(spacing, spacing, 0.12), glowMaterial(), pixels.length);
-  const bulbs = new InstancedMesh(new IcosahedronGeometry(0.085, 0), glowMaterial(), pixels.length);
+  const bulbs = new InstancedMesh(new SphereGeometry(0.085, 8, 6), glowMaterial(), pixels.length);
   const m = new Matrix4();
-  const letterColor = new Color('#FFC93A');
+  const letterColor = new Color(MARQUEE_YELLOW);
   pixels.forEach((p, i) => {
     letters.setMatrixAt(i, m.makeTranslation(p.x, p.y, z + 0.31));
     letters.setColorAt(i, letterColor);
@@ -847,7 +1312,7 @@ function marqueeSign() {
     const yy = y - H / 2 + inset + (i / (ny - 1)) * (H - 2 * inset);
     border.push({ x: -W / 2 + inset, y: yy, phase: 2 * nx + i }, { x: W / 2 - inset, y: yy, phase: nx - i });
   }
-  const chasers = new InstancedMesh(new IcosahedronGeometry(0.13, 0), glowMaterial(), border.length);
+  const chasers = new InstancedMesh(new SphereGeometry(0.13, 8, 6), glowMaterial(), border.length);
   border.forEach((p, i) => chasers.setMatrixAt(i, m.makeTranslation(p.x, p.y, z + 0.32)));
   [bulbs, chasers].forEach((mesh) => {
     mesh.setColorAt(0, letterColor);
@@ -858,9 +1323,9 @@ function marqueeSign() {
   chasers.name = 'marquee-chasers';
   group.add(letters, bulbs, chasers);
 
-  const white = new Color('#FFFDF0');
-  const warm = new Color('#FFE38A');
-  const amber = new Color('#E39A2A');
+  const white = new Color('#FFF8EA');
+  const warm = new Color('#FFE7B8');
+  const amber = new Color('#E9B48A');
   const c = new Color();
   let shown = NaN;
   /** @param {number} time */
@@ -890,9 +1355,9 @@ function marqueeSign() {
 }
 
 /**
- * The big screen on the east truss and the projector's beam from the tower
- * in Robson Square, right over the crowd. With a texture, the panels cycle
- * through the site's own ads; without one, through procedural colour panels.
+ * The big screen on the east truss and the projector's beam from the tower,
+ * right over the crowd. With a texture, the panels cycle through the site's
+ * own ads; without one, through procedural pastel panels.
  * @param {import('three').Texture | null} texture
  */
 function adScreen(texture) {
@@ -905,7 +1370,7 @@ function adScreen(texture) {
       tAds: { value: texture },
       uHasAds: { value: texture ? 1 : 0 },
       uTime: { value: 0 },
-      uColors: { value: [RED, BLUE, YELLOW, GREEN, PURPLE, ORANGE].map((c) => new Color(c)) },
+      uColors: { value: [ROSE_MID, SKY_MID, BUTTER, MINT_MID, LILAC_MID, PEACH_MID].map((c) => new Color(c)) },
     },
     vertexShader: /* glsl */ `
       varying vec2 vUv;
@@ -924,10 +1389,11 @@ function adScreen(texture) {
         vec3 b = uColors[int(mod(slide + 2.0, 6.0))];
         float stripes = smoothstep(0.45, 0.55, fract((vUv.x + vUv.y) * 4.0 - uTime * 0.4));
         float sun = smoothstep(0.23, 0.21, length(vUv - vec2(0.5, 0.45 + 0.08 * sin(uTime * 2.0))));
-        vec3 panel = mix(mix(a, a * 0.8, stripes), b, sun);
-        vec3 c = mix(panel, ad, uHasAds);
+        vec3 panel = mix(mix(a, a * 0.85, stripes), b, sun);
+        // The site's ads, softened toward the evening's pastels.
+        vec3 c = mix(panel, mix(ad, vec3(0.96, 0.92, 0.9), 0.18), uHasAds);
         // Each slide fades up from a little darker over half a second.
-        gl_FragColor = vec4(c * mix(0.75, 1.0, smoothstep(0.0, 0.15, local)), 1.0);
+        gl_FragColor = vec4(c * 0.9 * mix(0.82, 1.0, smoothstep(0.0, 0.15, local)), 1.0);
         #include <colorspace_fragment>
       }`,
   });
@@ -947,8 +1413,8 @@ function adScreen(texture) {
   ].map(([dz, dy]) => new Vector3(center.x - 0.05, center.y + dy, center.z - dz));
   const pos = [];
   const col = [];
-  const bright = new Color('#FFF1B8').multiplyScalar(0.22);
-  const faint = new Color('#FFF1B8').multiplyScalar(0.03);
+  const bright = new Color('#FFF1D8').multiplyScalar(0.16);
+  const faint = new Color('#FFF1D8').multiplyScalar(0.02);
   for (let i = 0; i < 4; i++) {
     const a = corners[i];
     const c = corners[(i + 1) % 4];
@@ -988,9 +1454,9 @@ function searchlights(count) {
     [40, 90, 5.3],
   ].slice(0, count);
   const material = new MeshBasicMaterial({
-    color: '#FFF4C9',
+    color: '#FFF1E2',
     transparent: true,
-    opacity: 0.08,
+    opacity: 0.06,
     ...LIGHT_BEAM,
     depthWrite: false,
     side: DoubleSide,
@@ -1019,13 +1485,97 @@ function searchlights(count) {
 }
 
 /**
- * The crowd all round: instanced bodies, heads, raised arms and phones, and a
- * row of paparazzi with cameras behind the ropes near the kerb.
+ * Bakes a colour into a geometry's vertices, for parts merged into one
+ * instanced shape (a crowd member's legs and shoes, eyes, hair). The instance
+ * colour multiplies it, so white parts take the instance colour.
+ * @param {BufferGeometry} geometry @param {string} color @param {Matrix4} [matrix]
+ */
+function tinted(geometry, color, matrix) {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  if (matrix) g.applyMatrix4(matrix);
+  g.deleteAttribute('uv');
+  if (!g.getAttribute('normal')) g.computeVertexNormals();
+  const c = new Color(color);
+  const n = g.getAttribute('position').count;
+  const colors = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) c.toArray(colors, i * 3);
+  g.setAttribute('color', new BufferAttribute(colors, 3));
+  return g;
+}
+
+/**
+ * A crowd member from the shoes to the shoulders: the instance colour is their
+ * top; trousers and shoes are darker. `low` is the lite tiers' version, with
+ * fewer sides to everything (there are a hundred of them, outlined).
+ * @param {boolean} low
+ */
+function crowdBody(low) {
+  const parts = [];
+  const sides = low ? 5 : 7;
+  for (const sx of [-1, 1]) {
+    parts.push(tinted(new CylinderGeometry(0.085, 0.075, 0.74, sides, 1, true), '#9A8FA8', place(sx * 0.11, 0.43, 0)));
+    parts.push(tinted(new IcosahedronGeometry(0.1, 0), SHOE, placeScaled(sx * 0.11, 0.055, 0.05, [0.95, 0.55, 1.4])));
+  }
+  parts.push(tinted(new CylinderGeometry(0.21, 0.25, 0.66, low ? 6 : 9), '#FFFFFF', place(0, 1.1, 0)));
+  if (!low)
+    parts.push(
+      tinted(
+        new SphereGeometry(0.22, 9, 3, 0, Math.PI * 2, 0, Math.PI / 2),
+        '#FFFFFF',
+        placeScaled(0, 1.42, 0, [1.05, 0.5, 0.95]),
+      ),
+    );
+  parts.push(tinted(new CylinderGeometry(0.26, 0.26, 0.06, low ? 6 : 9, 1, true), '#C7BACB', place(0, 0.8, 0)));
+  return mergeGeometries(parts);
+}
+
+/**
+ * A crowd member's head on its neck: the instance colour is the skin; eyes and
+ * hair are baked in. @param {boolean} low the lite tiers' version
+ */
+function crowdHead(low) {
+  const parts = [
+    tinted(new CylinderGeometry(0.06, 0.07, 0.12, 5, 1, true), '#FFFFFF', place(0, 0.05, 0)),
+    low
+      ? tinted(new IcosahedronGeometry(0.2, 1), '#FFFFFF', place(0, 0.29, 0))
+      : tinted(new SphereGeometry(0.2, 10, 7), '#FFFFFF', place(0, 0.29, 0)),
+    tinted(
+      new SphereGeometry(0.212, low ? 7 : 10, low ? 3 : 4, 0, Math.PI * 2, 0, Math.PI * 0.52),
+      '#5C4A52',
+      placeScaled(0, 0.31, -0.02, [1, 1, 1], 0, -0.25),
+    ),
+  ];
+  for (const sx of [-1, 1])
+    parts.push(tinted(new IcosahedronGeometry(0.028, 0), '#3A2A30', placeScaled(sx * 0.07, 0.3, 0.185, [1, 1.3, 0.6])));
+  return mergeGeometries(parts);
+}
+
+/**
+ * Both arms hanging from the shoulders (the origin), hands at the bottom;
+ * rotate the instance to raise them. @param {boolean} low the lite tiers' version
+ */
+function crowdArms(low) {
+  const parts = [];
+  for (const sx of [-1, 1]) {
+    parts.push(
+      tinted(new CylinderGeometry(0.06, 0.055, 0.56, low ? 4 : 6, 1, true), '#FFFFFF', place(sx * 0.27, -0.28, 0)),
+    );
+    parts.push(tinted(new IcosahedronGeometry(0.075, 0), '#FFFFFF', place(sx * 0.27, -0.6, 0.01)));
+  }
+  return mergeGeometries(parts);
+}
+
+/**
+ * The crowd all round: instanced bodies (tops, trousers, shoes), heads with
+ * hair and eyes, arms down or raised, phones, and a row of paparazzi with
+ * cameras behind the ropes near the kerb. Everyone stands on the plaza, with
+ * a soft shadow under their feet.
  * @param {number} count
  * @param {number} paparazzi
  * @param {() => number} random
+ * @param {boolean} [low] fewer sides to everything (lite tiers)
  */
-function crowd(count, paparazzi, random) {
+function crowd(count, paparazzi, random, low = false) {
   const group = new Group();
   /** @type {{ x: number, z: number, h: number, phase: number, phone: boolean, camera: boolean, arms: boolean, ry: number }[]} */
   const folks = [];
@@ -1043,19 +1593,21 @@ function crowd(count, paparazzi, random) {
       [-19, 16],
       [-24, 10.5],
     ].some(([tx, tz]) => Math.hypot(x - tx, z - tz) < 3.6) || // the tents
-    (x > 5.9 && x < 7 && z > 3.6 && z < 11.4) || // the photo wall
+    (x > 5.9 && x < 7.2 && z > 3.4 && z < 11.6) || // the photo wall
+    Math.hypot(x - CHAIR.x, z - CHAIR.z) < 1.1 || // the director's chair
     (x > 13.4 && x < 20.6 && z > 15.8 && z < 19.4) || // the food truck
     x > 23.5 || // the screen
     x < -27 || // the terraces
+    PALMS.some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.6) || // planters
     [
-      [-5.5, 2.5],
-      [5.5, 2.5],
-      [-5.5, KERB_Z - 1],
-      [5.5, KERB_Z - 1],
-    ].some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.4); // planters
+      [-3.4, 4.2],
+      [3.4, 4.2],
+      [-3.6, KERB_Z - 1.1],
+      [3.6, KERB_Z - 1.1],
+    ].some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.0); // shrubs and the arch's feet
 
   /** @param {number} x @param {number} z */
-  const crowded = (x, z) => folks.some((f) => Math.hypot(f.x - x, f.z - z) < 0.8);
+  const crowded = (x, z) => folks.some((f) => Math.hypot(f.x - x, f.z - z) < 0.85);
 
   // Paparazzi first, in two short rows at the kerb end of the ropes.
   for (let i = 0; i < paparazzi; i++) {
@@ -1093,39 +1645,40 @@ function crowd(count, paparazzi, random) {
     const tx = Math.abs(x) < 14 && z > 2.6 && z < KERB_Z ? 0 : EYE.x;
     const tz = Math.abs(x) < 14 && z > 2.6 && z < KERB_Z ? z : EYE.z;
     const near = Math.hypot(x - EYE.x, z - EYE.z) < 10;
+    const phone = near ? random() > 0.35 : random() > 0.6;
     folks.push({
       x,
       z,
-      h: 0.85 + random() * 0.3,
+      h: 0.88 + random() * 0.22,
       phase: random() * Math.PI * 2,
-      phone: near ? random() > 0.35 : random() > 0.6,
+      phone,
       camera: false,
-      arms: random() > 0.6,
+      arms: phone || random() > 0.6,
       ry: Math.atan2(tx - x, tz - z) + (random() - 0.5) * 0.5,
     });
   }
   const n = folks.length;
-  const lambert = new MeshLambertMaterial({ flatShading: true });
-  const body = new InstancedMesh(new CylinderGeometry(0.26, 0.4, 1.3, 6).translate(0, 0.65, 0), lambert, n);
-  const head = new InstancedMesh(new IcosahedronGeometry(0.27, 0), lambert, n);
-  const armsGeometry = mergeGeometries([
-    new BoxGeometry(0.13, 0.75, 0.13).translate(0, 0.35, 0).rotateZ(0.5),
-    new BoxGeometry(0.13, 0.75, 0.13).translate(0, 0.35, 0).rotateZ(-0.5),
-  ]);
-  const arms = new InstancedMesh(armsGeometry, lambert, n);
-  const phones = new InstancedMesh(new BoxGeometry(0.28, 0.44, 0.07), new MeshBasicMaterial({ color: '#BFE3FF' }), n);
+  const material = toon({ vertexColors: true });
+  const body = new InstancedMesh(crowdBody(low), material, n);
+  const head = new InstancedMesh(crowdHead(low), material, n);
+  const arms = new InstancedMesh(crowdArms(low), material, n);
+  const phones = new InstancedMesh(new BoxGeometry(0.16, 0.28, 0.04), new MeshBasicMaterial({ color: '#E3EEFB' }), n);
   const cameras = new InstancedMesh(
     mergeGeometries([
-      new BoxGeometry(0.36, 0.26, 0.24),
-      new CylinderGeometry(0.09, 0.1, 0.24, 8).rotateX(Math.PI / 2).translate(0, 0, 0.22),
+      tinted(new BoxGeometry(0.34, 0.24, 0.22), DUSK),
+      tinted(new CylinderGeometry(0.08, 0.09, 0.22, 10), PLUM, place(0, 0, 0.2, 0, Math.PI / 2)),
     ]),
-    new MeshLambertMaterial({ color: INK }),
+    toon({ vertexColors: true }),
     Math.max(1, paparazzi),
   );
   for (const m of [body, head, arms, cameras]) m.userData.outline = true;
+  body.name = 'crowd-bodies';
+  head.name = 'crowd-heads';
+  arms.name = 'crowd-arms';
   const skin = SKIN.map((c) => new Color(c));
   folks.forEach((f, i) => {
-    body.setColorAt(i, new Color(f.camera ? '#3A3550' : BRIGHTS[Math.floor(random() * BRIGHTS.length)]));
+    const top = f.camera ? DUSK : (random() < 0.5 ? MIDS : BRIGHTS)[Math.floor(random() * 6)];
+    body.setColorAt(i, new Color(top));
     head.setColorAt(i, skin[i % skin.length]);
     arms.setColorAt(i, skin[i % skin.length]);
   });
@@ -1141,57 +1694,139 @@ function crowd(count, paparazzi, random) {
 
   const m = new Matrix4();
   const q = new Quaternion();
+  const raise = new Quaternion();
   const s = new Vector3();
   const p = new Vector3();
   const up = new Vector3(0, 1, 0);
-  /** @param {number} t */
-  function update(t) {
+  const side = new Vector3(1, 0, 0);
+  const offset = new Vector3();
+  const flat = new Quaternion();
+  /**
+   * @param {number} t
+   * @param {InstancedMesh} blobs the shared contact shadows; fills from `slot`
+   * @param {number} slot
+   */
+  function update(t, blobs, slot) {
     let k = 0;
     let c = 0;
     folks.forEach((f, i) => {
-      // A smooth bounce: no kinks, so nothing snaps from one frame to the next.
-      const hop = (0.5 - 0.5 * Math.cos(t * 3.2 + f.phase)) ** 2 * 0.2 * (f.arms ? 1 : 0.4);
+      // A smooth bounce on the toes: no kinks, so nothing snaps from one frame to the next.
+      const hop = (0.5 - 0.5 * Math.cos(t * 3.2 + f.phase)) ** 2 * 0.12 * (f.arms ? 1 : 0.3);
       q.setFromAxisAngle(up, f.ry + Math.sin(t * 0.8 + f.phase) * 0.12);
       s.set(f.h, f.h, f.h);
       body.setMatrixAt(i, m.compose(p.set(f.x, hop, f.z), q, s));
-      head.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.55 * f.h, f.z), q, s));
-      // Arms down are hidden whole (scale 0): a squashed strip would still get an outline.
-      const armsUp = f.arms || f.camera ? f.h : 0;
-      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.15 * f.h, f.z), q, s.set(armsUp, armsUp, armsUp)));
+      head.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.47 * f.h, f.z), q, s));
+      // Arms from the shoulders: down, raised and cheering, or up to the face holding a camera.
+      const angle = f.camera ? -2.45 : f.arms ? Math.PI + 0.35 + 0.15 * Math.sin(t * 2.1 + f.phase) : 0.06;
+      raise.setFromAxisAngle(side, angle);
+      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.38 * f.h, f.z), flat.copy(q).multiply(raise), s));
       if (f.phone || f.camera) {
-        const lift = f.camera ? 1.62 : 1.9 + 0.25 * Math.sin(t * 1.3 + f.phase);
-        p.set(f.x + Math.sin(f.ry) * 0.38, hop + lift * f.h, f.z + Math.cos(f.ry) * 0.38);
+        offset
+          .set(0, f.camera ? 0.44 : 0.68, f.camera ? 0.4 : 0.22)
+          .multiplyScalar(f.h)
+          .applyQuaternion(q);
+        p.set(f.x, hop + 1.38 * f.h, f.z).add(offset);
         if (f.camera) cameras.setMatrixAt(c++, m.compose(p, q, s.set(1, 1, 1)));
         else phones.setMatrixAt(k++, m.compose(p, q, s.set(1, 1, 1)));
         emitters[devices.indexOf(f)].position.copy(p);
       }
+      // The contact shadow: a little smaller and lighter while they're up on their toes.
+      const size = 0.95 * f.h * (1 - hop * 1.5);
+      blobs.setMatrixAt(slot + i, m.compose(p.set(f.x, 0.014, f.z), flat.identity(), s.set(size, 1, size * 0.85)));
     });
     phones.count = k;
     cameras.count = c;
     [body, head, arms, phones, cameras].forEach((mesh) => (mesh.instanceMatrix.needsUpdate = true));
+    return slot + n;
   }
-  return { group, update, emitters };
+  return { group, update, emitters, size: n };
 }
 
 /**
- * Influencers posing all round the viewer with selfie sticks and phones. On
- * lighter devices they stand still, merged into one mesh: one draw call
- * instead of nine.
+ * One influencer, built in a Batch with their feet at the origin, facing +z:
+ * shoes, legs (or a skirt), a top with a collar and a belt, arms with hands
+ * (one on the hip, one up holding a phone or a selfie stick), a neck, a round
+ * head with eyes, cheeks, a nose and a smile, and hair (a bob, a ponytail or
+ * a bun). Returns where the phone is, for the flashes.
+ * @param {Batch} b
+ * @param {{ outfit: string, hair: string, skin: string, stick: boolean, skirt: boolean, style: number }} look
+ */
+function figure(b, look) {
+  const { outfit, hair, skin } = look;
+  const trousers = look.skirt ? skin : PLUM;
+  for (const sx of [-1, 1]) {
+    b.ball(0.11, SHOE, sx * 0.12, 0.06, 0.06, [0.95, 0.55, 1.45], 10);
+    b.cylinder(0.08, 0.095, 0.82, 7, trousers, sx * 0.12, 0.49, 0);
+  }
+  if (look.skirt) b.add(new CylinderGeometry(0.24, 0.4, 0.5, 14), outfit, place(0, 0.9, 0));
+  // The top, with a darker belt and a collar.
+  b.add(new CylinderGeometry(0.22, 0.27, 0.62, 11), outfit, place(0, 1.2, 0));
+  b.add(
+    new SphereGeometry(0.235, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+    outfit,
+    placeScaled(0, 1.5, 0, [1.08, 0.48, 0.98]),
+  );
+  b.add(new CylinderGeometry(0.275, 0.275, 0.07, 14), look.skirt ? BUTTER_MID : PLUM, place(0, 0.92, 0));
+  b.add(new TorusGeometry(0.1, 0.035, 6, 12), STONE_TRIM, place(0, 1.6, 0, 0, Math.PI / 2));
+  b.cylinder(0.065, 0.075, 0.16, 10, skin, 0, 1.66, 0);
+  // Head and face.
+  const hy = 1.92;
+  b.ball(0.24, skin, 0, hy, 0, [1, 1.02, 1], 12);
+  for (const sx of [-1, 1]) {
+    b.ball(0.034, INK, sx * 0.085, hy + 0.02, 0.215, [1, 1.35, 0.6], 8);
+    b.ball(0.045, ROSE, sx * 0.14, hy - 0.06, 0.18, [1, 0.6, 0.4], 8);
+  }
+  b.ball(0.035, skin, 0, hy - 0.03, 0.235, [1, 0.9, 1], 8);
+  b.add(new TorusGeometry(0.055, 0.012, 4, 10, Math.PI), INK, place(0, hy - 0.08, 0.215, 0, 0, Math.PI), false);
+  // Hair.
+  b.add(
+    new SphereGeometry(0.255, 14, 6, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    hair,
+    placeScaled(0, hy + 0.02, -0.025, [1, 1, 1], 0, -0.3),
+  );
+  b.ball(0.16, hair, 0, hy + 0.17, 0.12, [1.25, 0.45, 0.7], 10);
+  if (look.style === 1) b.ball(0.12, hair, 0, hy - 0.05, -0.26, [0.8, 1.6, 0.8], 10);
+  if (look.style === 2) b.ball(0.12, hair, 0, hy + 0.27, -0.06, [1, 1, 1], 10);
+  // Left arm: elbow out, hand on the hip.
+  const lShoulder = new Vector3(-0.29, 1.5, 0);
+  const lElbow = new Vector3(-0.47, 1.2, -0.02);
+  const lHand = new Vector3(-0.28, 0.98, 0.04);
+  b.pole(lShoulder, lElbow, 0.06, outfit, 8);
+  b.pole(lElbow, lHand, 0.052, skin, 8);
+  b.ball(0.075, skin, lHand.x, lHand.y, lHand.z, [1, 1, 1], 8);
+  // Right arm: up, holding the phone or the selfie stick.
+  const rShoulder = new Vector3(0.29, 1.5, 0);
+  const rElbow = new Vector3(0.48, 1.78, 0.1);
+  const rHand = new Vector3(0.46, 2.1, 0.22);
+  b.pole(rShoulder, rElbow, 0.06, outfit, 8);
+  b.pole(rElbow, rHand, 0.052, skin, 8);
+  b.ball(0.075, skin, rHand.x, rHand.y, rHand.z, [1, 1, 1], 8);
+  const tip = look.stick ? new Vector3(1.05, 3.0, 0.75) : new Vector3(0.46, 2.22, 0.32);
+  if (look.stick) b.pole(rHand, tip, 0.025, PLUM, 6);
+  const phone = new Matrix4().lookAt(tip, new Vector3(0, 1.9, 2), new Vector3(0, 1, 0)).setPosition(tip);
+  b.add(new BoxGeometry(0.17, 0.3, 0.04), '#E3EEFB', phone);
+  return tip;
+}
+
+/**
+ * Influencers posing all round the viewer with selfie sticks and phones, on
+ * the carpet or the plaza. On lighter devices they stand still, merged into
+ * one mesh: one draw call instead of nine.
  * @param {() => number} random
  * @param {boolean} still
  */
 function influencers(random, still) {
   const group = new Group();
   const looks = [
-    { x: -0.7, z: 6.5, outfit: YELLOW, hair: INK, stick: true },
-    { x: 0.9, z: 7.4, outfit: PURPLE, hair: ORANGE, stick: false },
-    { x: -0.4, z: 3.8, outfit: '#FFFFFF', hair: '#6B3A1E', stick: true },
-    { x: 0.6, z: 18.6, outfit: GREEN, hair: PINK, stick: false },
-    { x: -0.7, z: 19.6, outfit: PINK, hair: '#6B3A1E', stick: true },
-    { x: 9.5, z: 8.5, outfit: BLUE, hair: YELLOW, stick: true },
-    { x: 14, z: 14.5, outfit: ORANGE, hair: INK, stick: false },
-    { x: -9, z: 9, outfit: RED, hair: '#F1D2B6', stick: true },
-    { x: -9.5, z: 18.5, outfit: '#FFFFFF', hair: PURPLE, stick: false },
+    { x: -0.7, z: 6.5, outfit: BUTTER, hair: INK, stick: true, skirt: false, style: 0 },
+    { x: 0.9, z: 7.4, outfit: LILAC_MID, hair: PEACH_MID, stick: false, skirt: true, style: 1 },
+    { x: -0.4, z: 3.9, outfit: PAPER, hair: COCOA, stick: true, skirt: false, style: 2 },
+    { x: 0.6, z: 18.6, outfit: MINT_MID, hair: ROSE_DEEP, stick: false, skirt: true, style: 0 },
+    { x: -0.7, z: 19.6, outfit: ROSE, hair: COCOA, stick: true, skirt: false, style: 1 },
+    { x: 9.5, z: 8.5, outfit: SKY_MID, hair: BUTTER_MID, stick: true, skirt: true, style: 2 },
+    { x: 14, z: 14.5, outfit: PEACH, hair: INK, stick: false, skirt: false, style: 0 },
+    { x: -9, z: 9, outfit: ROSE_MID, hair: '#F1D2B6', stick: true, skirt: true, style: 1 },
+    { x: -9.5, z: 18.5, outfit: PAPER, hair: LILAC_DEEP, stick: false, skirt: false, style: 2 },
   ];
   /** @type {{ group: Group, phase: number, base: Vector3, ry: number }[]} */
   const figures = [];
@@ -1199,23 +1834,12 @@ function influencers(random, still) {
   const emitters = [];
   looks.forEach((look, i) => {
     const b = new Batch();
-    const skin = SKIN[(i * 2) % SKIN.length];
-    b.box(0.22, 1.0, 0.24, INK, -0.17, 0.5, 0);
-    b.box(0.22, 1.0, 0.24, INK, 0.17, 0.5, 0);
-    b.cylinder(0.3, 0.55, 1.25, 7, look.outfit, 0, 1.6, 0);
-    b.add(new IcosahedronGeometry(0.32, 1), skin, place(0, 2.6, 0));
-    b.add(new SphereGeometry(0.36, 7, 4, 0, Math.PI * 2, 0, Math.PI / 2), look.hair, place(0, 2.66, -0.03, 0, -0.2));
-    b.add(new IcosahedronGeometry(0.06, 0), INK, place(-0.12, 2.65, 0.29));
-    b.add(new IcosahedronGeometry(0.06, 0), INK, place(0.12, 2.65, 0.29));
-    // Left arm on hip, right arm up holding the phone (or the selfie stick).
-    b.add(new BoxGeometry(0.14, 0.75, 0.14), skin, place(-0.45, 1.75, 0, 0, 0, -0.6));
-    b.add(new BoxGeometry(0.15, 0.8, 0.15), skin, place(0.48, 2.25, 0.1, 0, -0.4, 0.5));
-    const tip = look.stick ? new Vector3(1.4, 3.9, 0.9) : new Vector3(0.66, 2.75, 0.45);
-    if (look.stick) b.pole(new Vector3(0.62, 2.6, 0.2), tip, 0.045, INK);
-    b.box(0.32, 0.52, 0.08, '#BFE3FF', tip.x, tip.y, tip.z, -0.6);
+    const tip = figure(b, { ...look, skin: SKIN[(i * 2) % SKIN.length] });
     const g = new Group();
     g.add(b.mesh());
-    const base = new Vector3(look.x, 0.04, look.z);
+    // On the carpet they stand on its top; elsewhere on the plaza.
+    const onCarpet = Math.abs(look.x) < 1.45 && look.z > 3.6 && look.z < KERB_Z - 0.2;
+    const base = new Vector3(look.x, onCarpet ? CARPET_TOP : 0, look.z);
     g.position.copy(base);
     // Pose for the viewer, more or less.
     const ry = Math.atan2(EYE.x - look.x, EYE.z - look.z) + (random() - 0.5) * 0.8;
@@ -1224,6 +1848,19 @@ function influencers(random, still) {
     figures.push({ group: g, phase: random() * 6, base, ry });
     emitters.push(worldPoint(g, tip, 3));
   });
+  const m = new Matrix4();
+  const flat = new Quaternion();
+  const s = new Vector3(0.95, 1, 0.8);
+  /** Their contact shadows, in the shared instanced blobs. @param {InstancedMesh} blobs @param {number} slot */
+  const shadow = (blobs, slot) => {
+    figures.forEach((f, i) =>
+      blobs.setMatrixAt(
+        slot + i,
+        m.compose(new Vector3(f.group.position.x, f.base.y + 0.014, f.group.position.z), flat, s),
+      ),
+    );
+    return slot + figures.length;
+  };
   if (still) {
     group.updateMatrixWorld(true);
     const merged = figures.map((f) => {
@@ -1243,17 +1880,25 @@ function influencers(random, still) {
     const frozen = new Group();
     frozen.add(one);
     // The flash emitters stay where they were, fixed to the (now static) poses.
-    return { group: frozen, update: () => {}, emitters };
+    return {
+      group: frozen,
+      update: (/** @type {number} */ _t, /** @type {InstancedMesh} */ blobs, /** @type {number} */ slot) =>
+        shadow(blobs, slot),
+      emitters,
+      size: figures.length,
+    };
   }
-  /** @param {number} t */
-  function update(t) {
+  /** @param {number} t @param {InstancedMesh} blobs @param {number} slot */
+  function update(t, blobs, slot) {
     figures.forEach((f) => {
       f.group.rotation.y = f.ry + Math.sin(t * 0.6 + f.phase) * 0.45;
-      f.group.position.y = f.base.y + (0.5 - 0.5 * Math.cos(t * 2 + f.phase)) * 0.06;
+      // A little sway from the hips, feet planted.
+      f.group.rotation.z = Math.sin(t * 1.3 + f.phase) * 0.025;
       f.group.updateMatrixWorld();
     });
+    return shadow(blobs, slot);
   }
-  return { group, update, emitters };
+  return { group, update, emitters, size: figures.length };
 }
 
 /**
@@ -1282,14 +1927,18 @@ function limo(color) {
   const b = new Batch();
   b.box(8.2, 0.9, 2.2, color, 0, 0.85, 0);
   b.box(5.6, 0.75, 2.0, color, -0.4, 1.65, 0);
-  b.box(5.4, 0.5, 2.06, '#2B2F5E', -0.4, 1.65, 0);
-  b.box(0.12, 0.3, 0.6, YELLOW, 4.12, 0.95, 0.65);
-  b.box(0.12, 0.3, 0.6, YELLOW, 4.12, 0.95, -0.65);
-  b.box(0.12, 0.25, 0.5, RED, -4.12, 0.95, 0.7);
-  b.box(0.12, 0.25, 0.5, RED, -4.12, 0.95, -0.7);
+  b.box(5.4, 0.5, 2.06, DUSK, -0.4, 1.65, 0);
+  b.box(8.3, 0.1, 2.24, STONE_TRIM, 0, 0.5, 0);
+  b.box(0.12, 0.3, 0.6, BUTTER, 4.12, 0.95, 0.65);
+  b.box(0.12, 0.3, 0.6, BUTTER, 4.12, 0.95, -0.65);
+  b.box(0.12, 0.25, 0.5, ROSE_MID, -4.12, 0.95, 0.7);
+  b.box(0.12, 0.25, 0.5, ROSE_MID, -4.12, 0.95, -0.7);
   for (const x of [-2.9, 2.6]) {
-    for (const z of [-1.1, 1.1])
-      b.add(new CylinderGeometry(0.45, 0.45, 0.3, 10), INK, place(x, 0.45, z, 0, Math.PI / 2));
+    for (const z of [-1.1, 1.1]) {
+      // Wheels on the road: centre at their radius.
+      b.add(new CylinderGeometry(0.45, 0.45, 0.3, 16), PLUM, place(x, 0.45, z, 0, Math.PI / 2));
+      b.add(new CylinderGeometry(0.2, 0.2, 0.32, 10), LILAC, place(x, 0.45, z, 0, Math.PI / 2), false);
+    }
   }
   const group = new Group();
   group.add(b.mesh());
@@ -1316,12 +1965,12 @@ function limo(color) {
  * @param {number} slots
  */
 function flashBulbs(emitters, slots) {
-  const mesh = new InstancedMesh(starShape(0.8, 0.3), glowMaterial(), slots);
+  const mesh = new InstancedMesh(starShape(0.7, 0.3), glowMaterial(), slots);
   mesh.instanceMatrix.setUsage(DynamicDrawUsage);
   mesh.frustumCulled = false;
   mesh.renderOrder = 2;
   mesh.name = 'flashes';
-  const flash = new Color('#FFFBE0');
+  const flash = new Color('#FFF6E2');
   for (let i = 0; i < slots; i++) mesh.setColorAt(i, flash);
   const pool = emitters.flatMap((e) => Array(e.weight).fill(e));
   const m = new Matrix4();
@@ -1350,6 +1999,53 @@ function flashBulbs(emitters, slots) {
 }
 
 /**
+ * Little sparkles twinkling round the marquee and over the carpet: four-point
+ * stars that swell and fade on their own slow beats, always facing the viewer.
+ * @param {number} count
+ * @param {() => number} random
+ */
+function sparkles(count, random) {
+  const s = new Shape();
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 2;
+    const r = i % 2 ? 0.08 : 0.32;
+    if (i === 0) s.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+    else s.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  const mesh = new InstancedMesh(new ShapeGeometry(s), glowMaterial(), count);
+  mesh.instanceMatrix.setUsage(DynamicDrawUsage);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = 2;
+  mesh.name = 'sparkles';
+  const tones = [new Color('#FFF4D6'), new Color(PEACH), new Color(LILAC), new Color(SKY)];
+  const spots = Array.from({ length: count }, (_, i) => {
+    mesh.setColorAt(i, tones[i % tones.length]);
+    // Half round the sign, half over the carpet and the plaza.
+    const nearSign = i % 2 === 0;
+    return {
+      at: nearSign
+        ? new Vector3((random() - 0.5) * 16, 8 + random() * 4.5, 0.6 + random() * 1.2)
+        : new Vector3((random() - 0.5) * 14, 2.6 + random() * 4, 3 + random() * 16),
+      period: 1.8 + random() * 2.4,
+      phase: random(),
+      size: 0.5 + random() * 0.7,
+    };
+  });
+  const m = new Matrix4();
+  const v = new Vector3();
+  /** @param {number} t @param {Quaternion} facing */
+  function update(t, facing) {
+    spots.forEach((sp, i) => {
+      const u = (t / sp.period + sp.phase) % 1;
+      const glow = Math.max(0, Math.sin(u * Math.PI)) ** 3 * sp.size;
+      mesh.setMatrixAt(i, m.compose(sp.at, facing, v.set(glow, glow, glow).addScalar(1e-4)));
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }
+  return { mesh, update };
+}
+
+/**
  * Confetti falling all round the viewer. Each piece grows in at the top and
  * shrinks away under the ground, so none of them blink in or out.
  * @param {number} count
@@ -1357,7 +2053,7 @@ function flashBulbs(emitters, slots) {
  */
 function confetti(count, random) {
   const TOP = 20;
-  const mesh = new InstancedMesh(new PlaneGeometry(0.26, 0.16), new MeshBasicMaterial({ side: DoubleSide }), count);
+  const mesh = new InstancedMesh(new PlaneGeometry(0.24, 0.15), new MeshBasicMaterial({ side: DoubleSide }), count);
   mesh.instanceMatrix.setUsage(DynamicDrawUsage);
   mesh.frustumCulled = false;
   const bits = Array.from({ length: count }, (_, i) => {

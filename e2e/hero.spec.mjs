@@ -177,7 +177,8 @@ test('graphics QA: the crayon strokes travel with the surfaces as the camera tur
   // that are fixed to the screen line up best with no shift; marks drawn on
   // the surfaces line up best at the scene's own shift.
   test.setTimeout(60_000);
-  await page.goto('/?hero-debug');
+  // The lite tier draws the strokes (software renderers, like CI's, leave them out).
+  await page.goto('/?hero-debug&hero-tier=lite');
   await expect(page.locator('#heroScene')).toHaveClass(/ready/);
   const r = await page.evaluate(() => {
     const hero = /** @type {any} */ (window).__hero;
