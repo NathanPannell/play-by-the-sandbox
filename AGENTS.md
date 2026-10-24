@@ -125,7 +125,7 @@ Follow `C:\repo\AGENTS.md` and the `deliver` skill: draft PR to `staging`, the f
 
 - A merge to `staging` makes Vercel build that commit, and it is served at `staging.playbythesandbox.ca`.
 - A merge to `main` makes a production deployment on `playbythesandbox.ca`. Open the `staging` → `main` PR only when the user asks, and merge it only with their approval.
-- Pushes to any other branch reach Vercel, but `scripts/vercel-ignore.mjs` cancels them, so there are no preview deployments.
+- Only `staging` and `main` create Vercel deployments. `git.deploymentEnabled` in `vercel.json` stops Vercel from creating one for any other branch, because even a canceled deployment counts toward the Hobby plan's 100-per-day limit. `scripts/vercel-ignore.mjs` stays as a second guard, so there are no preview deployments.
 
 GitHub branch protection and rulesets need GitHub Pro for private repos, so they're off. The merge rule in the `deliver` skill is the gate: every check is green on the head SHA.
 
