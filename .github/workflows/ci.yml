@@ -2,16 +2,16 @@ name: CI
 
 on:
   pull_request:
-    branches: [staging, main]
+    branches: [main]
   push:
-    branches: [staging, main]
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  # PR runs supersede each other; every staging/main push keeps its own run.
+  # PR runs supersede each other; every main push keeps its own run.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
