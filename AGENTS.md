@@ -124,7 +124,7 @@ The shortcuts can be turned off from the footer ("Turn off keyboard shortcuts", 
 
 ## Delivery
 
-Follow `C:\repo\AGENTS.md` and the `deliver` skill: draft PR to `staging`, the full CI gate (`.github/workflows/ci.yml`), review, then squash-merge. Merges deploy on their own:
+Follow `C:\repo\AGENTS.md` and the `deliver` skill: draft PR to `staging`, the checks from `.github/workflows/ci.yml` run locally (GitHub CI runs only for PRs and pushes to `main`), review, then squash-merge. Merges deploy on their own:
 
 - A merge to `staging` makes Vercel build that commit, and it is served at `staging.playbythesandbox.ca`.
 - A merge to `main` makes a production deployment on `playbythesandbox.ca`. Open the `staging` → `main` PR only when the user asks, and merge it only with their approval.
