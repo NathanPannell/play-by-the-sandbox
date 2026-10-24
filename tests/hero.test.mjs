@@ -534,30 +534,73 @@ describe('scene', () => {
     }
   });
 
-  it('draws everyone’s eyes as small dark dots, left out of the ink outline', () => {
-    const world = buildScene(desktop);
-    const head = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-heads'));
-    const colors = head.geometry.getAttribute('color');
-    const position = head.geometry.getAttribute('position');
-    /** @type {Vector3[]} */
-    const eye = [];
-    for (let i = 0; i < colors.count; i++)
-      if (colors.getX(i) < 0.5) eye.push(new Vector3().fromBufferAttribute(position, i));
-    expect(eye.length).toBeGreaterThan(0);
-    for (const sx of [-1, 1]) {
-      const one = eye.filter((p) => Math.sign(p.x) === sx);
-      const span = (/** @type {'x' | 'y'} */ k) =>
-        Math.max(...one.map((p) => p[k])) - Math.min(...one.map((p) => p[k]));
-      expect(span('x')).toBeLessThan(0.045);
-      expect(span('y')).toBeLessThan(0.055);
+  it('gives everyone a friendly baby face, none of it in the ink outline', () => {
+    for (const quality of [desktop, phone]) {
+      const world = buildScene(quality);
+      const bodies = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-bodies'));
+      const open = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-heads'));
+      const happy = /** @type {InstancedMesh} */ (world.scene.getObjectByName('crowd-heads-happy'));
+      // About three in ten have their eyes closed in happy arcs.
+      expect(open.count + happy.count).toBe(bodies.count);
+      expect(happy.count / bodies.count).toBeGreaterThan(0.15);
+      expect(happy.count / bodies.count).toBeLessThan(0.45);
+      // The head is a ball of radius 0.2 round y = 0.29; the face's colours are
+      // multiplied by the skin, so ink is dark and the cheeks are rosy.
+      const CY = 0.29;
+      /** @param {InstancedMesh} head */
+      const face = (head) => {
+        const colors = head.geometry.getAttribute('color');
+        const position = head.geometry.getAttribute('position');
+        /** @type {Vector3[]} */
+        const ink = [];
+        let rosy = 0;
+        for (let i = 0; i < colors.count; i++) {
+          const [r, g] = [colors.getX(i), colors.getY(i)];
+          if (r < 0.2) ink.push(new Vector3().fromBufferAttribute(position, i));
+          else if (r - g > 0.2) rosy++;
+        }
+        return { ink, rosy };
+      };
+      /** @param {Vector3[]} points */
+      const mean = (points) => points.reduce((a, p) => a.add(p), new Vector3()).divideScalar(points.length);
+      /** The eyes (above the mouth) on one side and the smile, from the ink. @param {Vector3[]} ink */
+      const parts = (ink) => ({
+        eye: (/** @type {number} */ sx) => ink.filter((p) => p.y > CY - 0.06 && Math.sign(p.x) === sx),
+        smile: ink.filter((p) => p.y <= CY - 0.06),
+      });
+      for (const head of [open, happy]) {
+        const { ink, rosy } = face(head);
+        expect(rosy).toBeGreaterThan(20); // blush on both cheeks
+        const { eye, smile } = parts(ink);
+        for (const sx of [-1, 1]) {
+          const one = eye(sx);
+          const centre = mean(one);
+          // Set low (below the middle of the head) and wide apart.
+          expect(centre.y).toBeLessThan(CY);
+          expect(Math.abs(centre.x)).toBeGreaterThan(0.07);
+          const width = Math.max(...one.map((p) => p.x)) - Math.min(...one.map((p) => p.x));
+          expect(width).toBeGreaterThan(0.045);
+          expect(width).toBeLessThan(0.08);
+          // Open eyes are round dots; closed ones are arcs, high in the middle (^ ^).
+          const middle = one.filter((p) => Math.abs(p.x - centre.x) < 0.008);
+          const ends = one.filter((p) => Math.abs(p.x - centre.x) > 0.025);
+          if (head === happy) expect(mean(middle).y).toBeGreaterThan(mean(ends).y + 0.008);
+          else expect(Math.max(...one.map((p) => p.y)) - Math.min(...one.map((p) => p.y))).toBeGreaterThan(width);
+        }
+        // An upturned smile: its corners higher than its middle.
+        const corners = smile.filter((p) => Math.abs(p.x) > 0.04);
+        const bottom = smile.filter((p) => Math.abs(p.x) < 0.015);
+        expect(mean(corners).y).toBeGreaterThan(mean(bottom).y + 0.015);
+        // The outline hull is the head and neck only (every point above the neck
+        // on the ball): an ink ring round a little eye makes it stare.
+        const hull = /** @type {import('three').BufferGeometry} */ (head.userData.hull).getAttribute('position');
+        const centre = new Vector3(0, CY, 0);
+        for (let i = 0; i < hull.count; i++) {
+          const at = new Vector3().fromBufferAttribute(hull, i);
+          if (at.y > 0.15) expect(at.distanceTo(centre)).toBeCloseTo(0.2, 4);
+        }
+      }
     }
-    // The head's own outline hull leaves the eyes out: an ink ring round each made them stare.
-    const hull = /** @type {import('three').BufferGeometry} */ (head.userData.hull);
-    hull.computeBoundingBox();
-    head.geometry.computeBoundingBox();
-    const front = /** @type {import('three').Box3} */ (head.geometry.boundingBox).max.z;
-    expect(Math.max(...eye.map((p) => p.z))).toBeCloseTo(front);
-    expect(/** @type {import('three').Box3} */ (hull.boundingBox).max.z).toBeLessThan(front - 0.005);
   });
 
   it('puts each influencer’s phone in their hand, or on the selfie stick they hold', () => {
