@@ -60,4 +60,11 @@ describe('vercel ignore step', () => {
       .status;
   it.each(['main', 'staging'])('exits 1 (build) for %s', (ref) => expect(exitCode(ref)).toBe(1));
   it('exits 0 (skip) for other branches', () => expect(exitCode('feat/x')).toBe(0));
+
+  // Canceled deployments still count toward the Hobby plan's daily limit, so only these two branches may create one.
+  it('creates deployments only for main and staging', () => {
+    const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
+    expect(config.git.deploymentEnabled).toEqual({ '**': false, main: true, staging: true });
+    expect(config.ignoreCommand).toBe('node scripts/vercel-ignore.mjs');
+  });
 });
