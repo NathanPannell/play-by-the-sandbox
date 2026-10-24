@@ -1582,20 +1582,35 @@ function crowdBody(low) {
   return mergeGeometries(parts);
 }
 
+/** The eyes, the same on everyone: small solid dots, a little taller than wide, with no outline. */
+const EYE_INK = INK;
+
 /**
  * A crowd member's head on its neck: the instance colour is the skin; the eyes
- * are baked in, the hair is its own mesh. @param {boolean} low the lite tiers' version
+ * are baked in, the hair is its own mesh. The neck reaches down into the
+ * shoulders, so no gap opens under it. The outline hull (userData.hull) is the
+ * head and neck only: an ink ring round each little eye made them stare.
+ * @param {boolean} low the lite tiers' version
  */
 function crowdHead(low) {
-  const parts = [
-    tinted(new CylinderGeometry(0.06, 0.07, 0.12, 5, 1, true), '#FFFFFF', place(0, 0.05, 0)),
+  const solid = [
+    tinted(new CylinderGeometry(0.06, 0.07, 0.18, 5, 1, true), '#FFFFFF', place(0, 0.02, 0)),
     low
       ? tinted(new IcosahedronGeometry(0.2, 1), '#FFFFFF', place(0, 0.29, 0))
       : tinted(new SphereGeometry(0.2, 10, 7), '#FFFFFF', place(0, 0.29, 0)),
   ];
-  for (const sx of [-1, 1])
-    parts.push(tinted(new IcosahedronGeometry(0.028, 0), '#3A2A30', placeScaled(sx * 0.07, 0.3, 0.185, [1, 1.3, 0.6])));
-  return mergeGeometries(parts);
+  const eyes = [-1, 1].map((sx) =>
+    tinted(
+      new SphereGeometry(0.019, low ? 5 : 6, low ? 3 : 4),
+      EYE_INK,
+      placeScaled(sx * 0.068, 0.285, 0.182, [1, 1.3, 0.6]),
+    ),
+  );
+  const geometry = mergeGeometries([...solid, ...eyes]);
+  const outline = mergeGeometries(solid.map((g) => g.clone().deleteAttribute('color').deleteAttribute('normal')));
+  geometry.userData.hull = hullGeometry(outline);
+  outline.dispose();
+  return geometry;
 }
 
 /**
@@ -1632,19 +1647,24 @@ const CROWD_HAIR = [
   COCOA,
 ];
 
+/** Where a crowd member's hand is, in the frame of one arm (`crowdArm`). */
+export const CROWD_HAND = new Vector3(0, -0.6, 0.01);
+/** A crowd member's shoulders, in their body's frame (scaled by their build). */
+export const CROWD_SHOULDER = new Vector3(0.27, 1.38, 0);
+
 /**
- * Both arms hanging from the shoulders (the origin), hands at the bottom;
- * rotate the instance to raise them. @param {boolean} low the lite tiers' version
+ * One arm hanging from its shoulder (the origin), the hand at the bottom
+ * (`CROWD_HAND`); turn the instance to point it. The shoulder is a ball, so
+ * the arm stays joined to the body however it is raised.
+ * @param {boolean} low the lite tiers' version
  */
-function crowdArms(low) {
-  const parts = [];
-  for (const sx of [-1, 1]) {
-    parts.push(
-      tinted(new CylinderGeometry(0.06, 0.055, 0.56, low ? 4 : 6, 1, true), '#FFFFFF', place(sx * 0.27, -0.28, 0)),
-    );
-    parts.push(tinted(new IcosahedronGeometry(0.075, 0), '#FFFFFF', place(sx * 0.27, -0.6, 0.01)));
-  }
-  return mergeGeometries(parts);
+function crowdArm(low) {
+  const sides = low ? 5 : 6;
+  return mergeGeometries([
+    tinted(new SphereGeometry(0.066, sides, 3), '#FFFFFF'),
+    tinted(new CylinderGeometry(0.06, 0.055, 0.56, sides, 1, true), '#FFFFFF', place(0, -0.28, 0)),
+    tinted(new IcosahedronGeometry(0.075, 0), '#FFFFFF', place(CROWD_HAND.x, CROWD_HAND.y, CROWD_HAND.z)),
+  ]);
 }
 
 /**
@@ -1770,13 +1790,15 @@ function crowd(count, paparazzi, random, low = false) {
   const material = toon({ vertexColors: true });
   const body = new InstancedMesh(crowdBody(low), material, n);
   const head = new InstancedMesh(crowdHead(low), material, n);
+  head.userData.hull = head.geometry.userData.hull;
   const shortHaired = folks.filter((f) => f.hair !== 1);
   const longHaired = folks.filter((f) => f.hair === 1);
   const hairShort = new InstancedMesh(crowdHair(low, false), material, Math.max(1, shortHaired.length));
   const hairLong = new InstancedMesh(crowdHair(low, true), material, Math.max(1, longHaired.length));
   /** Each person's slot in their hair mesh. */
   const hairSlot = folks.map((f) => (f.hair === 1 ? longHaired : shortHaired).indexOf(f));
-  const arms = new InstancedMesh(crowdArms(low), material, n);
+  // Two arms each, so each can reach on its own: slots 2i and 2i + 1.
+  const arms = new InstancedMesh(crowdArm(low), material, n * 2);
   const phones = new InstancedMesh(new BoxGeometry(0.16, 0.28, 0.04), new MeshBasicMaterial({ color: '#E3EEFB' }), n);
   const cameras = new InstancedMesh(
     mergeGeometries([
@@ -1790,6 +1812,8 @@ function crowd(count, paparazzi, random, low = false) {
   body.name = 'crowd-bodies';
   head.name = 'crowd-heads';
   arms.name = 'crowd-arms';
+  phones.name = 'crowd-phones';
+  cameras.name = 'crowd-cameras';
   hairShort.name = 'crowd-hair';
   hairLong.name = 'crowd-hair-long';
   const skin = SKIN.map((c) => new Color(c));
@@ -1797,7 +1821,8 @@ function crowd(count, paparazzi, random, low = false) {
     const top = f.camera ? DUSK : (random() < 0.5 ? MIDS : BRIGHTS)[Math.floor(random() * 6)];
     body.setColorAt(i, new Color(top));
     head.setColorAt(i, skin[i % skin.length]);
-    arms.setColorAt(i, skin[i % skin.length]);
+    arms.setColorAt(i * 2, skin[i % skin.length]);
+    arms.setColorAt(i * 2 + 1, skin[i % skin.length]);
     (f.hair === 1 ? hairLong : hairShort).setColorAt(hairSlot[i], new Color(f.hairColor));
   });
   hairShort.count = shortHaired.length;
@@ -1814,15 +1839,46 @@ function crowd(count, paparazzi, random, low = false) {
 
   const m = new Matrix4();
   const q = new Quaternion();
-  const raise = new Quaternion();
+  const reach = new Quaternion();
   const s = new Vector3();
   const p = new Vector3();
   const up = new Vector3(0, 1, 0);
-  const side = new Vector3(1, 0, 0);
-  const offset = new Vector3();
+  const down = new Vector3(0, -1, 0);
   const flat = new Quaternion();
   const built = new Vector3();
   const puff = new Vector3();
+  const shoulder = new Vector3();
+  const dir = new Vector3();
+  const hands = [new Vector3(), new Vector3()];
+  /** The phone's centre above the hand gripping its lower end. */
+  const phoneGrip = new Vector3(0, 0.085, 0);
+  /**
+   * A direction for an arm, in the body's frame: from shoulder x `from`, so
+   * the hand (at `length`) ends at body x `to`, rising `rise` radians from
+   * straight ahead (negative is down).
+   * @param {number} from @param {number} to @param {number} length @param {number} rise
+   */
+  const aim = (from, to, length, rise) => {
+    const dx = clamp((to - from) / length, -0.95, 0.95);
+    const k = Math.sqrt(1 - dx * dx);
+    return dir.set(dx, k * Math.sin(rise), k * Math.cos(rise));
+  };
+  /**
+   * Points one arm (`side` -1 or 1) of person `i` along `direction` (body
+   * frame) from their shoulder, and returns where its hand is, in world space.
+   * @param {number} i @param {number} side @param {Vector3} direction @param {number} hop
+   */
+  const pose = (i, side, direction, hop) => {
+    const f = folks[i];
+    shoulder
+      .set(side * CROWD_SHOULDER.x * f.w, CROWD_SHOULDER.y * f.h, 0)
+      .applyQuaternion(q)
+      .add(p.set(f.x, hop, f.z));
+    reach.setFromUnitVectors(down, direction.normalize()).premultiply(q);
+    const slot = i * 2 + (side > 0 ? 1 : 0);
+    arms.setMatrixAt(slot, m.compose(shoulder, reach, built));
+    return hands[side > 0 ? 1 : 0].copy(CROWD_HAND).applyMatrix4(m);
+  };
   /**
    * @param {number} t
    * @param {InstancedMesh} blobs the shared contact shadows; fills from `slot`
@@ -1843,25 +1899,28 @@ function crowd(count, paparazzi, random, low = false) {
       puff.copy(s);
       if (f.hair === 2) puff.x = puff.z = s.x * 1.12;
       (f.hair === 1 ? hairLong : hairShort).setMatrixAt(hairSlot[i], m.compose(p, q, f.hair === 1 ? s : puff));
-      // Arms from the shoulders: down, hands together in front, raised and
-      // cheering, or up to the face holding a camera.
-      const angle = f.camera
-        ? -2.45
-        : f.arms
-          ? Math.PI + 0.35 + 0.15 * Math.sin(t * 2.1 + f.phase)
-          : f.front
-            ? -0.42
-            : 0.06;
-      raise.setFromAxisAngle(side, angle);
-      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.38 * f.h, f.z), flat.copy(q).multiply(raise), built));
-      if (f.phone || f.camera) {
-        offset
-          .set(0, f.camera ? 0.44 : 0.68, f.camera ? 0.4 : 0.22)
-          .multiplyScalar(f.h)
-          .applyQuaternion(q);
-        p.set(f.x, hop + 1.38 * f.h, f.z).add(offset);
-        if (f.camera) cameras.setMatrixAt(c++, m.compose(p, q, s.set(1, 1, 1)));
-        else phones.setMatrixAt(k++, m.compose(p, q, s.set(1, 1, 1)));
+      // Arms from the shoulders: down (clear of the hips), hands together in
+      // front, raised and cheering, one up holding a phone, or both up to the
+      // face holding a camera. Whatever they hold is placed from the hands.
+      const from = CROWD_SHOULDER.x * f.w;
+      const length = -CROWD_HAND.y * f.h;
+      const wave = 0.15 * Math.sin(t * 2.1 + f.phase);
+      for (const sx of [-1, 1]) {
+        if (f.camera) pose(i, sx, aim(sx * from, sx * 0.2, length, 0.78), hop);
+        else if (f.phone && sx > 0) pose(i, sx, aim(from, 0.12, length, 1.05 + wave), hop);
+        else if (f.arms && !f.phone) pose(i, sx, dir.set(sx * 0.35, 0.9, 0.3 + wave), hop);
+        else if (f.front) pose(i, sx, aim(sx * from, sx * 0.08, length, -0.98), hop);
+        else pose(i, sx, dir.set(sx * 0.15, -1, 0.06), hop);
+      }
+      if (f.camera) {
+        // Held in both hands, which grip its sides.
+        p.copy(hands[0]).add(hands[1]).multiplyScalar(0.5);
+        cameras.setMatrixAt(c++, m.compose(p, q, s.set(1, 1, 1)));
+        emitters[devices.indexOf(f)].position.copy(p);
+      } else if (f.phone) {
+        // Upright in the raised hand, which closes round its lower end.
+        p.copy(phoneGrip).applyQuaternion(q).add(hands[1]);
+        phones.setMatrixAt(k++, m.compose(p, q, s.set(1, 1, 1)));
         emitters[devices.indexOf(f)].position.copy(p);
       }
       // The contact shadow: a little smaller and lighter while they're up on their toes.
@@ -1883,7 +1942,7 @@ function crowd(count, paparazzi, random, low = false) {
  * shoes, legs (or a skirt), a top with a collar and a belt, arms with hands
  * (one on the hip, one up holding a phone or a selfie stick), a neck, a round
  * head with eyes, cheeks, a nose and a smile, and hair (a bob, a ponytail or
- * a bun). Returns where the phone is, for the flashes.
+ * a bun). Returns where the phone is, for the flashes, and the hand holding it.
  * @param {Batch} b
  * @param {{ outfit: string, hair: string, skin: string, case: string, stick: boolean, skirt: boolean, style: number }} look
  */
@@ -1905,11 +1964,12 @@ function figure(b, look) {
   b.add(new CylinderGeometry(0.275, 0.275, 0.07, 14), look.skirt ? BUTTER_MID : PLUM, place(0, 0.92, 0));
   b.add(new TorusGeometry(0.1, 0.035, 6, 12), STONE_TRIM, place(0, 1.6, 0, 0, Math.PI / 2));
   b.cylinder(0.065, 0.075, 0.16, 10, skin, 0, 1.66, 0);
-  // Head and face.
+  // Head and face. The eyes are small solid dots like the crowd's, with no
+  // outline: an ink ring round them made them stare.
   const hy = 1.92;
   b.ball(0.24, skin, 0, hy, 0, [1, 1.02, 1], 12);
   for (const sx of [-1, 1]) {
-    b.ball(0.034, INK, sx * 0.085, hy + 0.02, 0.215, [1, 1.35, 0.6], 8);
+    b.add(new SphereGeometry(0.024, 8, 6), EYE_INK, placeScaled(sx * 0.082, hy - 0.005, 0.222, [1, 1.3, 0.6]), false);
     b.ball(0.045, ROSE, sx * 0.14, hy - 0.06, 0.18, [1, 0.6, 0.4], 8);
   }
   b.ball(0.035, skin, 0, hy - 0.03, 0.235, [1, 0.9, 1], 8);
@@ -1923,28 +1983,32 @@ function figure(b, look) {
   b.ball(0.16, hair, 0, hy + 0.17, 0.12, [1.25, 0.45, 0.7], 10);
   if (look.style === 1) b.ball(0.12, hair, 0, hy - 0.05, -0.26, [0.8, 1.6, 0.8], 10);
   if (look.style === 2) b.ball(0.12, hair, 0, hy + 0.27, -0.06, [1, 1, 1], 10);
+  // Arms in sleeves to the elbow, then bare forearms and hands. Balls at the
+  // shoulders and elbows keep each joint closed whatever its angle.
+  /** @param {Vector3} shoulder @param {Vector3} elbow @param {Vector3} hand */
+  const arm = (shoulder, elbow, hand) => {
+    b.ball(0.066, outfit, shoulder.x, shoulder.y, shoulder.z, [1, 1, 1], 8);
+    b.pole(shoulder, elbow, 0.06, outfit, 8);
+    b.ball(0.06, outfit, elbow.x, elbow.y, elbow.z, [1, 1, 1], 8);
+    b.pole(elbow, hand, 0.052, skin, 8);
+    b.ball(0.075, skin, hand.x, hand.y, hand.z, [1, 1, 1], 8);
+  };
   // Left arm: elbow out, hand on the hip.
-  const lShoulder = new Vector3(-0.29, 1.5, 0);
-  const lElbow = new Vector3(-0.47, 1.2, -0.02);
-  const lHand = new Vector3(-0.28, 0.98, 0.04);
-  b.pole(lShoulder, lElbow, 0.06, outfit, 8);
-  b.pole(lElbow, lHand, 0.052, skin, 8);
-  b.ball(0.075, skin, lHand.x, lHand.y, lHand.z, [1, 1, 1], 8);
+  arm(new Vector3(-0.29, 1.5, 0), new Vector3(-0.47, 1.2, -0.02), new Vector3(-0.28, 0.98, 0.04));
   // Right arm: up, holding the phone or the selfie stick.
-  const rShoulder = new Vector3(0.29, 1.5, 0);
-  const rElbow = new Vector3(0.48, 1.78, 0.1);
   const rHand = new Vector3(0.46, 2.1, 0.22);
-  b.pole(rShoulder, rElbow, 0.06, outfit, 8);
-  b.pole(rElbow, rHand, 0.052, skin, 8);
-  b.ball(0.075, skin, rHand.x, rHand.y, rHand.z, [1, 1, 1], 8);
-  // A short selfie stick in light metal with a grip, or the phone in the hand.
-  const tip = look.stick ? new Vector3(0.74, 2.66, 0.5) : new Vector3(0.46, 2.22, 0.32);
+  arm(new Vector3(0.29, 1.5, 0), new Vector3(0.48, 1.78, 0.1), rHand);
+  // The phone: a pastel case, its screen out toward the crowd. On a short
+  // selfie stick in light metal, gripped in the hand, it sits on the stick's
+  // end; otherwise it stands in the hand, which closes round its lower end.
+  const face = new Vector3(0, 1.9, 2);
+  const tip = look.stick ? new Vector3(0.74, 2.66, 0.5) : rHand.clone();
+  const phone = new Matrix4().lookAt(tip, face, new Vector3(0, 1, 0));
   if (look.stick) {
     b.pole(rHand, tip, 0.028, METAL, 6);
     b.pole(rHand.clone().lerp(tip, -0.12), rHand.clone().lerp(tip, 0.22), 0.045, PLUM, 8);
-  }
-  // The phone: a pastel case, its screen out toward the crowd.
-  const phone = new Matrix4().lookAt(tip, new Vector3(0, 1.9, 2), new Vector3(0, 1, 0)).setPosition(tip);
+  } else tip.add(new Vector3(0, 0.11, 0).applyMatrix4(phone));
+  phone.setPosition(tip);
   b.add(new BoxGeometry(0.21, 0.36, 0.05), look.case, phone);
   b.add(
     new BoxGeometry(0.17, 0.3, 0.02),
@@ -1952,7 +2016,7 @@ function figure(b, look) {
     phone.clone().multiply(new Matrix4().makeTranslation(0, 0, -0.03)),
     false,
   );
-  return tip;
+  return { phone: tip, hand: rHand };
 }
 
 /**
@@ -1981,8 +2045,10 @@ function influencers(random, still) {
   const emitters = [];
   looks.forEach((look, i) => {
     const b = new Batch();
-    const tip = figure(b, { ...look, skin: SKIN[(i * 2) % SKIN.length], case: BRIGHTS[(i + 3) % BRIGHTS.length] });
+    const held = figure(b, { ...look, skin: SKIN[(i * 2) % SKIN.length], case: BRIGHTS[(i + 3) % BRIGHTS.length] });
+    const tip = held.phone;
     const g = new Group();
+    g.userData.held = { ...held, stick: look.stick };
     g.add(b.mesh());
     // On the carpet they stand on its top; elsewhere on the plaza.
     const onCarpet = Math.abs(look.x) < 1.45 && look.z > 3.6 && look.z < KERB_Z - 0.2;
