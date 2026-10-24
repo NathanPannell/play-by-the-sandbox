@@ -531,8 +531,10 @@ describe('crayon on the models', () => {
       const material = [...coloured][0];
       material.onBeforeCompile(/** @type {any} */ (shader), /** @type {any} */ (null));
       expect(shader.vertexShader).toContain('vCrayonPos = position;');
-      expect(shader.fragmentShader).toMatch(/#include <color_fragment>\n[\s\S]*diffuseColor\.rgb = mix\(paper/);
-      expect(Object.keys(shader.uniforms)).toEqual(['tCrayon', 'uCrayonVariant', 'uCrayonPaper', 'uCrayonRim']);
+      expect(shader.fragmentShader).toMatch(
+        /#include <color_fragment>\n[\s\S]*diffuseColor\.rgb = mix\(diffuseColor\.rgb \* 1\.03, deeper/,
+      );
+      expect(Object.keys(shader.uniforms)).toEqual(['tCrayon', 'uCrayonVariant', 'uCrayonRim']);
       expect(Boolean(material.defines?.CRAYON_LITE)).toBe(quality.lite);
       // Every crayon material shares one compiled program per tier.
       expect(material.customProgramCacheKey()).toBe(quality.lite ? 'crayon-lite' : 'crayon');
@@ -557,7 +559,7 @@ describe('crayon on the models', () => {
       fragmentShader: '#include <common>\n#include <color_fragment>\n#include <opaque_fragment>',
     };
     material.onBeforeCompile(/** @type {any} */ (shader), /** @type {any} */ (null));
-    expect(shader.fragmentShader).not.toContain('diffuseColor.rgb = mix(paper');
+    expect(shader.fragmentShader).not.toContain('deeper');
     expect(shader.fragmentShader).toContain('#ifdef CRAYON_RIM');
     expect(material.customProgramCacheKey()).toBe('crayon-plain');
     kit.dispose();

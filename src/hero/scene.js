@@ -48,6 +48,7 @@ import {
   HemisphereLight,
   IcosahedronGeometry,
   InstancedMesh,
+  LinearFilter,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -143,8 +144,8 @@ const COLUMNS = [-8.4, -5, -1.7, 1.7, 5, 8.4];
 const COLUMN_Z = -2.4;
 /** Planters with palms at the corners of the carpet. */
 const PALMS = [
-  [-5.5, 2.6],
-  [5.5, 2.6],
+  [-5.5, 3.75],
+  [5.5, 3.75],
   [-5.5, KERB_Z - 1.2],
   [5.5, KERB_Z - 1.2],
 ];
@@ -368,6 +369,9 @@ const BLOB = (() => {
     }
   }
   const tex = new DataTexture(data, n, n, RGBAFormat);
+  // Smooth when stretched under a limo or the fountain.
+  tex.magFilter = LinearFilter;
+  tex.minFilter = LinearFilter;
   tex.needsUpdate = true;
   return tex;
 })();
@@ -507,6 +511,9 @@ export function buildScene(quality, { adTexture = null } = {}) {
   }
 
   const m = new Matrix4();
+  const limoAt = new Vector3();
+  const limoSize = new Vector3(9, 1, 3);
+  const noTurn = new Quaternion();
   /**
    * @param {number} t seconds
    * @param {number} [cameraT] where the camera is, if not at t (graphics QA
@@ -533,10 +540,7 @@ export function buildScene(quality, { adTexture = null } = {}) {
     limos.forEach((l, i) => {
       l.update(t + i * (CYCLE / 2));
       // The limo's shadow: long and soft under it, wherever it is.
-      blobs.setMatrixAt(
-        k++,
-        m.compose(new Vector3(l.group.position.x, 0.03, ROAD_Z), new Quaternion(), new Vector3(9, 1, 3)),
-      );
+      blobs.setMatrixAt(k++, m.compose(limoAt.set(l.group.position.x, 0.03, ROAD_Z), noTurn, limoSize));
     });
     blobs.count = k;
     blobs.instanceMatrix.needsUpdate = true;
@@ -801,7 +805,7 @@ function plaza(b, shadows) {
   b.box(200, 0.35, 0.4, KERB, 0, 0.05, ROAD_Z + 5.7);
   for (let x = -90; x < 90; x += 4.4)
     b.add(new BoxGeometry(2.2, 0.03, 0.18), BUTTER, place(x, 0.04, ROAD_Z + 1.9), false);
-  b.add(new BoxGeometry(200, 0.2, 60), '#E3D3B8', place(0, -0.06, ROAD_Z + 36), false);
+  b.add(new BoxGeometry(200, 0.2, 60), '#E3D3B8', place(0, -0.1, ROAD_Z + 36), false);
 
   // The carpet, from the kerb up every step to the door: flat on each tread,
   // down each riser, and flat across the portico, with brass edging on the plaza.
@@ -941,36 +945,85 @@ function palm(b, shadows, x, z, seed) {
     const a = (k / 3) * Math.PI * 2;
     b.ball(0.14, COCOA, crown.x + Math.cos(a) * 0.18, crown.y - 0.12, crown.z + Math.sin(a) * 0.18, [1, 1, 1], 8);
   }
-  // Fronds: segments of leaf along an arching curve, widest in the middle.
-  for (let f = 0; f < 7; f++) {
-    const a = (f / 7) * Math.PI * 2 + seed;
-    const reach = 1.9 + 0.3 * Math.sin(f * 1.7 + seed);
-    const lift = 0.5 + 0.2 * Math.cos(f * 2.1);
-    const dir = new Vector3(Math.cos(a), 0, Math.sin(a));
-    let prev = crown.clone();
-    const n = 5;
-    for (let k = 1; k <= n; k++) {
-      const u = k / n;
-      const p = crown
+  // A full crown: a lower ring of long fronds that arch out and droop, and a
+  // shorter upper ring that stands up between them.
+  const tones = [MINT_MID, '#A6D4B6', '#9CCBAE'];
+  for (let f = 0; f < 9; f++) {
+    const a = (f / 9) * Math.PI * 2 + seed;
+    const reach = 2.3 + 0.35 * Math.sin(f * 1.7 + seed);
+    b.add(frond(crown, a, reach, 0.55 + 0.2 * Math.cos(f * 2.1), 1.5, 0.36), tones[f % 3]);
+  }
+  for (let f = 0; f < 5; f++) {
+    const a = ((f + 0.5) / 5) * Math.PI * 2 + seed * 1.3;
+    b.add(frond(crown.clone().setY(crown.y + 0.08), a, 1.45, 1.05, 0.75, 0.3), tones[(f + 1) % 3]);
+  }
+}
+
+/**
+ * One palm frond as a closed leaf blade: it rises from the crown along a curve
+ * that arches out and droops at the tip, tapers to a point at both ends,
+ * folds up into a shallow V along its midrib near the crown, and sags at the
+ * sides toward the tip, as a real leaf does under its own weight.
+ * @param {Vector3} crown where it grows from
+ * @param {number} angle which way it points, around the trunk
+ * @param {number} reach how far out it goes
+ * @param {number} lift how high it arches
+ * @param {number} droop how far the tip falls
+ * @param {number} width its half-width at the widest
+ */
+function frond(crown, angle, reach, lift, droop, width) {
+  const n = 9;
+  const dir = new Vector3(Math.cos(angle), 0, Math.sin(angle));
+  const at = (/** @type {number} */ u) =>
+    crown
+      .clone()
+      .addScaledVector(dir, reach * u)
+      .add(new Vector3(0, lift * Math.sin(u * Math.PI * 0.6) - droop * u * u, 0));
+  const up = new Vector3(0, 1, 0);
+  const positions = [];
+  for (let k = 0; k <= n; k++) {
+    const u = k / n;
+    const c = at(u);
+    const tangent = at(Math.min(1, u + 0.02))
+      .sub(at(Math.max(0, u - 0.02)))
+      .normalize();
+    const side = new Vector3().crossVectors(tangent, up).normalize();
+    const normal = new Vector3().crossVectors(side, tangent).normalize();
+    // Narrow at the crown, widest a third of the way out, a point at the tip.
+    const w = width * Math.sin(Math.PI * Math.pow(u, 0.62)) * (k === n ? 0 : 1);
+    const fold = 0.45 - 1.0 * u; // edges up near the crown, sagging past the middle
+    const t = 0.035 * (1 - u) + 0.008;
+    // A diamond cross-section: left edge, midrib top, right edge, midrib underside.
+    positions.push(
+      c
         .clone()
-        .addScaledVector(dir, reach * u)
-        .add(new Vector3(0, lift * Math.sin(u * Math.PI * 0.7) - 1.2 * u * u, 0));
-      const mid = prev.clone().lerp(p, 0.5);
-      const len = prev.distanceTo(p);
-      const width = 0.12 + 0.34 * Math.sin(u * Math.PI);
-      const m = new Matrix4().lookAt(prev, p, new Vector3(0, 1, 0));
-      m.setPosition(mid);
-      for (const side of [-1, 1]) {
-        // Long, narrow leaflets swept forward along the frond, overlapping the next pair.
-        const leaf = new BoxGeometry(width * 0.55, 0.03, len * 1.35)
-          .translate((side * width * 0.5) / 2, 0, len * 0.25)
-          .rotateY(side * 0.6)
-          .rotateZ(side * 0.32);
-        b.add(leaf, side < 0 ? MINT_MID : MINT_DEEP, m);
-      }
-      prev = p;
+        .addScaledVector(side, -w)
+        .addScaledVector(normal, fold * w),
+      c.clone().addScaledVector(normal, t),
+      c
+        .clone()
+        .addScaledVector(side, w)
+        .addScaledVector(normal, fold * w),
+      c.clone().addScaledVector(normal, -t),
+    );
+  }
+  const index = [];
+  for (let k = 0; k < n; k++) {
+    for (let j = 0; j < 4; j++) {
+      const a0 = k * 4 + j;
+      const a1 = k * 4 + ((j + 1) % 4);
+      const b0 = a0 + 4;
+      const b1 = a1 + 4;
+      index.push(a0, a1, b0, a1, b1, b0);
     }
   }
+  // Close both ends.
+  const tip = n * 4;
+  index.push(0, 2, 1, 0, 3, 2, tip, tip + 1, tip + 2, tip, tip + 2, tip + 3);
+  const g = new BufferGeometry().setFromPoints(positions);
+  g.setIndex(index);
+  g.computeVertexNormals();
+  return g;
 }
 
 /** A round pot with a bushy shrub of three clumps. @param {Batch} b @param {number} x @param {number} z @param {number} y */
@@ -1388,7 +1441,7 @@ function adScreen(texture) {
         vec3 a = uColors[int(mod(slide, 6.0))];
         vec3 b = uColors[int(mod(slide + 2.0, 6.0))];
         float stripes = smoothstep(0.45, 0.55, fract((vUv.x + vUv.y) * 4.0 - uTime * 0.4));
-        float sun = smoothstep(0.23, 0.21, length(vUv - vec2(0.5, 0.45 + 0.08 * sin(uTime * 2.0))));
+        float sun = 1.0 - smoothstep(0.21, 0.23, length(vUv - vec2(0.5, 0.45 + 0.08 * sin(uTime * 2.0))));
         vec3 panel = mix(mix(a, a * 0.85, stripes), b, sun);
         // The site's ads, softened toward the evening's pastels.
         vec3 c = mix(panel, mix(ad, vec3(0.96, 0.92, 0.9), 0.18), uHasAds);
@@ -1530,8 +1583,8 @@ function crowdBody(low) {
 }
 
 /**
- * A crowd member's head on its neck: the instance colour is the skin; eyes and
- * hair are baked in. @param {boolean} low the lite tiers' version
+ * A crowd member's head on its neck: the instance colour is the skin; the eyes
+ * are baked in, the hair is its own mesh. @param {boolean} low the lite tiers' version
  */
 function crowdHead(low) {
   const parts = [
@@ -1539,16 +1592,45 @@ function crowdHead(low) {
     low
       ? tinted(new IcosahedronGeometry(0.2, 1), '#FFFFFF', place(0, 0.29, 0))
       : tinted(new SphereGeometry(0.2, 10, 7), '#FFFFFF', place(0, 0.29, 0)),
-    tinted(
-      new SphereGeometry(0.212, low ? 7 : 10, low ? 3 : 4, 0, Math.PI * 2, 0, Math.PI * 0.52),
-      '#5C4A52',
-      placeScaled(0, 0.31, -0.02, [1, 1, 1], 0, -0.25),
-    ),
   ];
   for (const sx of [-1, 1])
     parts.push(tinted(new IcosahedronGeometry(0.028, 0), '#3A2A30', placeScaled(sx * 0.07, 0.3, 0.185, [1, 1.3, 0.6])));
   return mergeGeometries(parts);
 }
+
+/**
+ * A crowd member's hair, placed like the head: a cap, or with `long` a cap
+ * and hair falling to the shoulders behind. The instance colour is the hair's.
+ * @param {boolean} low the lite tiers' version @param {boolean} long
+ */
+function crowdHair(low, long) {
+  const parts = [
+    tinted(
+      new SphereGeometry(0.212, low ? 7 : 10, low ? 3 : 4, 0, Math.PI * 2, 0, Math.PI * 0.52),
+      '#FFFFFF',
+      placeScaled(0, 0.31, -0.02, [1, 1, 1], 0, -0.25),
+    ),
+  ];
+  if (long)
+    parts.push(
+      tinted(new IcosahedronGeometry(0.2, low ? 0 : 1), '#FFFFFF', placeScaled(0, 0.16, -0.1, [1, 1.3, 0.55])),
+    );
+  return mergeGeometries(parts);
+}
+
+/** Hair colours for the crowd: dark, brown, auburn, fair, grey and a few dyed pastels. */
+const CROWD_HAIR = [
+  '#5C4A52',
+  '#3A3342',
+  COCOA,
+  '#5C4A52',
+  PEACH_MID,
+  BUTTER_MID,
+  '#B9AFB4',
+  LILAC_DEEP,
+  ROSE_MID,
+  COCOA,
+];
 
 /**
  * Both arms hanging from the shoulders (the origin), hands at the bottom;
@@ -1577,7 +1659,7 @@ function crowdArms(low) {
  */
 function crowd(count, paparazzi, random, low = false) {
   const group = new Group();
-  /** @type {{ x: number, z: number, h: number, phase: number, phone: boolean, camera: boolean, arms: boolean, ry: number }[]} */
+  /** @type {{ x: number, z: number, h: number, w: number, phase: number, phone: boolean, camera: boolean, arms: boolean, front: boolean, hair: number, hairColor: string, ry: number }[]} */
   const folks = [];
 
   /** @param {number} x @param {number} z */
@@ -1607,7 +1689,19 @@ function crowd(count, paparazzi, random, low = false) {
     ].some(([px, pz]) => Math.hypot(x - px, z - pz) < 1.0); // shrubs and the arch's feet
 
   /** @param {number} x @param {number} z */
-  const crowded = (x, z) => folks.some((f) => Math.hypot(f.x - x, f.z - z) < 0.85);
+  const crowded = (x, z) => folks.some((f) => Math.hypot(f.x - x, f.z - z) < 0.72);
+  /** A look for one person: build, hair and colouring vary, and a few are children. */
+  const look = () => {
+    const child = random() < 0.06;
+    const h = child ? 0.64 + random() * 0.08 : 0.84 + random() * 0.3;
+    return {
+      h,
+      w: h * (0.86 + random() * 0.3),
+      // Lite tiers skip long hair: one hair mesh, two fewer draw calls.
+      hair: random() < 0.38 ? (low ? 2 : 1) : random() < 0.3 ? 2 : 0,
+      hairColor: CROWD_HAIR[Math.floor(random() * CROWD_HAIR.length)],
+    };
+  };
 
   // Paparazzi first, in two short rows at the kerb end of the ropes.
   for (let i = 0; i < paparazzi; i++) {
@@ -1617,50 +1711,71 @@ function crowd(count, paparazzi, random, low = false) {
     folks.push({
       x,
       z,
+      ...look(),
       h: 0.95,
+      w: 0.95 + random() * 0.15,
       phase: random() * 6.3,
       phone: false,
       camera: true,
       arms: false,
+      front: false,
       ry: sx > 0 ? -Math.PI / 2 : Math.PI / 2,
     });
   }
+  // Everyone else comes in little groups of one to five, standing together:
+  // most of them within 22 m, a few on the far pavement.
   let guard = 0;
   while (folks.length < count + paparazzi && guard++ < count * 40) {
-    // Most of the crowd within 22 m, a few on the far pavement.
-    let x;
-    let z;
-    if (random() < 0.12) {
-      x = (random() - 0.5) * 80;
-      z = ROAD_Z + 6.4 + random() * 1.6;
+    let cx;
+    let cz;
+    const far = random() < 0.12;
+    if (far) {
+      cx = (random() - 0.5) * 80;
+      cz = ROAD_Z + 6.6 + random() * 1.2;
     } else {
       const a = random() * Math.PI * 2;
-      const r = 5.6 + Math.sqrt(random()) * 18;
-      x = EYE.x + Math.sin(a) * r;
-      z = EYE.z + Math.cos(a) * r;
+      const r = 5.8 + Math.sqrt(random()) * 18;
+      cx = EYE.x + Math.sin(a) * r;
+      cz = EYE.z + Math.cos(a) * r;
     }
-    if (z <= ROAD_Z + 5.9 && blocked(x, z)) continue;
-    if (crowded(x, z)) continue;
-    // Face the carpet if beside it, otherwise the viewer.
-    const tx = Math.abs(x) < 14 && z > 2.6 && z < KERB_Z ? 0 : EYE.x;
-    const tz = Math.abs(x) < 14 && z > 2.6 && z < KERB_Z ? z : EYE.z;
-    const near = Math.hypot(x - EYE.x, z - EYE.z) < 10;
-    const phone = near ? random() > 0.35 : random() > 0.6;
-    folks.push({
-      x,
-      z,
-      h: 0.88 + random() * 0.22,
-      phase: random() * Math.PI * 2,
-      phone,
-      camera: false,
-      arms: phone || random() > 0.6,
-      ry: Math.atan2(tx - x, tz - z) + (random() - 0.5) * 0.5,
-    });
+    const size = 1 + Math.floor(random() ** 1.4 * 5);
+    const chatting = size > 2 && random() < 0.35;
+    for (let j = 0; j < size && folks.length < count + paparazzi; j++) {
+      const a = random() * Math.PI * 2;
+      const d = j === 0 ? 0 : 0.6 + random() * 0.45;
+      const x = cx + Math.cos(a) * d;
+      const z = far ? Math.min(ROAD_Z + 7.9, Math.max(ROAD_Z + 6.4, cz + Math.sin(a) * d * 0.5)) : cz + Math.sin(a) * d;
+      if (z <= ROAD_Z + 5.9 && blocked(x, z)) continue;
+      if (crowded(x, z)) continue;
+      // Face the carpet if beside it, each other if chatting, otherwise the viewer.
+      const byCarpet = Math.abs(x) < 14 && z > 2.6 && z < KERB_Z;
+      const [tx, tz] = byCarpet ? [0, z] : chatting && j > 0 ? [cx, cz] : [EYE.x, EYE.z];
+      const near = Math.hypot(x - EYE.x, z - EYE.z) < 10;
+      const phone = !(chatting && !byCarpet) && (near ? random() > 0.45 : random() > 0.72);
+      const arms = phone || random() > 0.78;
+      folks.push({
+        x,
+        z,
+        ...look(),
+        phase: random() * Math.PI * 2,
+        phone,
+        camera: false,
+        arms,
+        front: !arms && random() < 0.45,
+        ry: Math.atan2(tx - x, tz - z) + (random() - 0.5) * 0.5,
+      });
+    }
   }
   const n = folks.length;
   const material = toon({ vertexColors: true });
   const body = new InstancedMesh(crowdBody(low), material, n);
   const head = new InstancedMesh(crowdHead(low), material, n);
+  const shortHaired = folks.filter((f) => f.hair !== 1);
+  const longHaired = folks.filter((f) => f.hair === 1);
+  const hairShort = new InstancedMesh(crowdHair(low, false), material, Math.max(1, shortHaired.length));
+  const hairLong = new InstancedMesh(crowdHair(low, true), material, Math.max(1, longHaired.length));
+  /** Each person's slot in their hair mesh. */
+  const hairSlot = folks.map((f) => (f.hair === 1 ? longHaired : shortHaired).indexOf(f));
   const arms = new InstancedMesh(crowdArms(low), material, n);
   const phones = new InstancedMesh(new BoxGeometry(0.16, 0.28, 0.04), new MeshBasicMaterial({ color: '#E3EEFB' }), n);
   const cameras = new InstancedMesh(
@@ -1671,20 +1786,25 @@ function crowd(count, paparazzi, random, low = false) {
     toon({ vertexColors: true }),
     Math.max(1, paparazzi),
   );
-  for (const m of [body, head, arms, cameras]) m.userData.outline = true;
+  for (const m of [body, head, arms, cameras, hairShort, hairLong]) m.userData.outline = true;
   body.name = 'crowd-bodies';
   head.name = 'crowd-heads';
   arms.name = 'crowd-arms';
+  hairShort.name = 'crowd-hair';
+  hairLong.name = 'crowd-hair-long';
   const skin = SKIN.map((c) => new Color(c));
   folks.forEach((f, i) => {
     const top = f.camera ? DUSK : (random() < 0.5 ? MIDS : BRIGHTS)[Math.floor(random() * 6)];
     body.setColorAt(i, new Color(top));
     head.setColorAt(i, skin[i % skin.length]);
     arms.setColorAt(i, skin[i % skin.length]);
+    (f.hair === 1 ? hairLong : hairShort).setColorAt(hairSlot[i], new Color(f.hairColor));
   });
-  [body, head, arms, phones, cameras].forEach((m) => {
+  hairShort.count = shortHaired.length;
+  hairLong.count = longHaired.length;
+  [body, head, hairShort, hairLong, arms, phones, cameras].forEach((m) => {
     m.instanceMatrix.setUsage(DynamicDrawUsage);
-    group.add(m);
+    if (m !== hairLong || longHaired.length) group.add(m);
   });
 
   /** Where phones and cameras flash, as live positions. Cameras fire more. */
@@ -1701,6 +1821,8 @@ function crowd(count, paparazzi, random, low = false) {
   const side = new Vector3(1, 0, 0);
   const offset = new Vector3();
   const flat = new Quaternion();
+  const built = new Vector3();
+  const puff = new Vector3();
   /**
    * @param {number} t
    * @param {InstancedMesh} blobs the shared contact shadows; fills from `slot`
@@ -1714,12 +1836,24 @@ function crowd(count, paparazzi, random, low = false) {
       const hop = (0.5 - 0.5 * Math.cos(t * 3.2 + f.phase)) ** 2 * 0.12 * (f.arms ? 1 : 0.3);
       q.setFromAxisAngle(up, f.ry + Math.sin(t * 0.8 + f.phase) * 0.12);
       s.set(f.h, f.h, f.h);
-      body.setMatrixAt(i, m.compose(p.set(f.x, hop, f.z), q, s));
+      built.set(f.w, f.h, f.w);
+      body.setMatrixAt(i, m.compose(p.set(f.x, hop, f.z), q, built));
       head.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.47 * f.h, f.z), q, s));
-      // Arms from the shoulders: down, raised and cheering, or up to the face holding a camera.
-      const angle = f.camera ? -2.45 : f.arms ? Math.PI + 0.35 + 0.15 * Math.sin(t * 2.1 + f.phase) : 0.06;
+      // Short hair can be a fuller, rounder cut.
+      puff.copy(s).multiplyScalar(f.hair === 2 ? 1.1 : 1);
+      if (f.hair === 2) puff.y *= 1.12;
+      (f.hair === 1 ? hairLong : hairShort).setMatrixAt(hairSlot[i], m.compose(p, q, f.hair === 1 ? s : puff));
+      // Arms from the shoulders: down, hands together in front, raised and
+      // cheering, or up to the face holding a camera.
+      const angle = f.camera
+        ? -2.45
+        : f.arms
+          ? Math.PI + 0.35 + 0.15 * Math.sin(t * 2.1 + f.phase)
+          : f.front
+            ? -0.42
+            : 0.06;
       raise.setFromAxisAngle(side, angle);
-      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.38 * f.h, f.z), flat.copy(q).multiply(raise), s));
+      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.38 * f.h, f.z), flat.copy(q).multiply(raise), built));
       if (f.phone || f.camera) {
         offset
           .set(0, f.camera ? 0.44 : 0.68, f.camera ? 0.4 : 0.22)
@@ -1731,12 +1865,14 @@ function crowd(count, paparazzi, random, low = false) {
         emitters[devices.indexOf(f)].position.copy(p);
       }
       // The contact shadow: a little smaller and lighter while they're up on their toes.
-      const size = 0.95 * f.h * (1 - hop * 1.5);
+      const size = 0.95 * f.w * (1 - hop * 1.5);
       blobs.setMatrixAt(slot + i, m.compose(p.set(f.x, 0.014, f.z), flat.identity(), s.set(size, 1, size * 0.85)));
     });
     phones.count = k;
     cameras.count = c;
-    [body, head, arms, phones, cameras].forEach((mesh) => (mesh.instanceMatrix.needsUpdate = true));
+    [body, head, hairShort, hairLong, arms, phones, cameras].forEach(
+      (mesh) => (mesh.instanceMatrix.needsUpdate = true),
+    );
     return slot + n;
   }
   return { group, update, emitters, size: n };
@@ -1749,7 +1885,7 @@ function crowd(count, paparazzi, random, low = false) {
  * head with eyes, cheeks, a nose and a smile, and hair (a bob, a ponytail or
  * a bun). Returns where the phone is, for the flashes.
  * @param {Batch} b
- * @param {{ outfit: string, hair: string, skin: string, stick: boolean, skirt: boolean, style: number }} look
+ * @param {{ outfit: string, hair: string, skin: string, case: string, stick: boolean, skirt: boolean, style: number }} look
  */
 function figure(b, look) {
   const { outfit, hair, skin } = look;
@@ -1801,10 +1937,21 @@ function figure(b, look) {
   b.pole(rShoulder, rElbow, 0.06, outfit, 8);
   b.pole(rElbow, rHand, 0.052, skin, 8);
   b.ball(0.075, skin, rHand.x, rHand.y, rHand.z, [1, 1, 1], 8);
-  const tip = look.stick ? new Vector3(1.05, 3.0, 0.75) : new Vector3(0.46, 2.22, 0.32);
-  if (look.stick) b.pole(rHand, tip, 0.025, PLUM, 6);
+  // A short selfie stick in light metal with a grip, or the phone in the hand.
+  const tip = look.stick ? new Vector3(0.74, 2.66, 0.5) : new Vector3(0.46, 2.22, 0.32);
+  if (look.stick) {
+    b.pole(rHand, tip, 0.028, METAL, 6);
+    b.pole(rHand.clone().lerp(tip, -0.12), rHand.clone().lerp(tip, 0.22), 0.045, PLUM, 8);
+  }
+  // The phone: a pastel case with its screen toward the poser.
   const phone = new Matrix4().lookAt(tip, new Vector3(0, 1.9, 2), new Vector3(0, 1, 0)).setPosition(tip);
-  b.add(new BoxGeometry(0.17, 0.3, 0.04), '#E3EEFB', phone);
+  b.add(new BoxGeometry(0.21, 0.36, 0.05), look.case, phone);
+  b.add(
+    new BoxGeometry(0.17, 0.3, 0.02),
+    '#EEF4FC',
+    phone.clone().multiply(new Matrix4().makeTranslation(0, 0, -0.03)),
+    false,
+  );
   return tip;
 }
 
@@ -1834,7 +1981,7 @@ function influencers(random, still) {
   const emitters = [];
   looks.forEach((look, i) => {
     const b = new Batch();
-    const tip = figure(b, { ...look, skin: SKIN[(i * 2) % SKIN.length] });
+    const tip = figure(b, { ...look, skin: SKIN[(i * 2) % SKIN.length], case: BRIGHTS[(i + 3) % BRIGHTS.length] });
     const g = new Group();
     g.add(b.mesh());
     // On the carpet they stand on its top; elsewhere on the plaza.
@@ -1851,13 +1998,11 @@ function influencers(random, still) {
   const m = new Matrix4();
   const flat = new Quaternion();
   const s = new Vector3(0.95, 1, 0.8);
+  const at = new Vector3();
   /** Their contact shadows, in the shared instanced blobs. @param {InstancedMesh} blobs @param {number} slot */
   const shadow = (blobs, slot) => {
     figures.forEach((f, i) =>
-      blobs.setMatrixAt(
-        slot + i,
-        m.compose(new Vector3(f.group.position.x, f.base.y + 0.014, f.group.position.z), flat, s),
-      ),
+      blobs.setMatrixAt(slot + i, m.compose(at.set(f.group.position.x, f.base.y + 0.014, f.group.position.z), flat, s)),
     );
     return slot + figures.length;
   };
@@ -2020,12 +2165,16 @@ function sparkles(count, random) {
   const tones = [new Color('#FFF4D6'), new Color(PEACH), new Color(LILAC), new Color(SKY)];
   const spots = Array.from({ length: count }, (_, i) => {
     mesh.setColorAt(i, tones[i % tones.length]);
-    // Half round the sign, half over the carpet and the plaza.
+    // Half round the sign, half over the carpet and the plaza, but not right
+    // in the viewer's face, where a sparkle would fill the screen.
     const nearSign = i % 2 === 0;
+    let at = new Vector3((random() - 0.5) * 16, 8 + random() * 4.5, 0.6 + random() * 1.2);
+    for (let tries = 0; !nearSign && tries < 20; tries++) {
+      at = new Vector3((random() - 0.5) * 14, 2.6 + random() * 4, 3 + random() * 16);
+      if (at.distanceTo(EYE) > 7) break;
+    }
     return {
-      at: nearSign
-        ? new Vector3((random() - 0.5) * 16, 8 + random() * 4.5, 0.6 + random() * 1.2)
-        : new Vector3((random() - 0.5) * 14, 2.6 + random() * 4, 3 + random() * 16),
+      at,
       period: 1.8 + random() * 2.4,
       phase: random(),
       size: 0.5 + random() * 0.7,
