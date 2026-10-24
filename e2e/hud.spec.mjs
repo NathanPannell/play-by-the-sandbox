@@ -32,13 +32,16 @@ test('the site has no letter shortcuts: H, R, T, W, A and P do nothing', async (
   await expect(scene).toHaveAttribute('data-state', 'running');
   // No key badges, no advertised shortcuts and no switch to turn them off.
   await expect(page.locator('kbd, [data-key], [aria-keyshortcuts], #kbdToggle')).toHaveCount(0);
+  // After each key, give a late handler a moment, then check nothing moved:
+  // no jump to a section, no scroll, and the scene still turning (a P that
+  // paused and a Shift+P that resumed would otherwise cancel out).
   for (const key of ['h', 'r', 't', 'w', 'a', 'p', 'Shift+H', 'Shift+P']) {
     await page.keyboard.press(key);
+    await page.waitForTimeout(150);
     expect(new URL(page.url()).hash).toBe('');
+    expect(await page.evaluate(() => window.scrollY)).toBe(0);
+    expect(await scene.getAttribute('data-state')).toBe('running');
   }
-  expect(await page.evaluate(() => window.scrollY)).toBe(0);
-  // P no longer pauses the scene.
-  await expect(scene).toHaveAttribute('data-state', 'running');
 });
 
 test('odd keys do nothing and break nothing', async ({ page }) => {
