@@ -214,7 +214,10 @@ uniform vec4 uCrayonVariant;
 uniform vec3 uCrayonPaper;
 varying vec3 vCrayonPos;
 varying vec3 vCrayonNormal;
-float crayonAt(vec2 uv) { return dot(texture2D(tCrayon, uv), uCrayonVariant); }
+// Sampled with explicit gradients (from the position, which is continuous), so
+// a switch between projection planes or face angles doesn't make the GPU pick
+// the blurriest mip along it and draw a seam.
+float crayonAt(vec2 uv, vec2 gx, vec2 gy) { return dot(textureGrad(tCrayon, uv, gx, gy), uCrayonVariant); }
 vec2 crayonTurn(vec2 v, float a) { float c = cos(a), s = sin(a); return vec2(c * v.x - s * v.y, s * v.x + c * v.y); }
 // Each face orientation colours in at its own angle, as a hand would.
 float crayonAngle(vec3 n) {
@@ -224,25 +227,36 @@ float crayonAngle(vec3 n) {
 // The strokes, pressed harder and lighter in broad patches (the same texture,
 // far bigger and turned, so blurred by its mipmaps), which also keeps a big
 // wall from showing the tile.
-float crayonPlane(vec2 p, float a) {
-  vec2 q = crayonTurn(p, a) / ${STROKE_TILE.toFixed(3)};
-  return crayonAt(q) * mix(0.72, 1.18, crayonAt(crayonTurn(q, 1.9) * 0.11 + 0.37));
+float crayonPlane(vec2 p, vec2 px, vec2 py, float a) {
+  float k = 1.0 / ${STROKE_TILE.toFixed(3)};
+  vec2 q = crayonTurn(p, a) * k;
+  vec2 gx = crayonTurn(px, a) * k;
+  vec2 gy = crayonTurn(py, a) * k;
+  float pressure = crayonAt(crayonTurn(q, 1.9) * 0.11 + 0.37, crayonTurn(gx, 1.9) * 0.11, crayonTurn(gy, 1.9) * 0.11);
+  return crayonAt(q, gx, gy) * mix(0.72, 1.18, pressure);
 }
 float crayonWax(vec3 p, vec3 n) {
   vec3 an = abs(n);
   float a = crayonAngle(n);
+  vec3 dx = dFdx(p);
+  vec3 dy = dFdy(p);
   #ifdef CRAYON_LITE
   // Phones: only the plane the surface faces most.
   bool onX = an.x >= an.y && an.x >= an.z;
   bool onY = !onX && an.y >= an.z;
-  return crayonPlane(onX ? p.zy : onY ? p.xz : p.xy, a + (onX ? 0.0 : onY ? 0.7 : 1.4));
+  return crayonPlane(
+    onX ? p.zy : onY ? p.xz : p.xy,
+    onX ? dx.zy : onY ? dx.xz : dx.xy,
+    onX ? dy.zy : onY ? dy.xz : dy.xy,
+    a + (onX ? 0.0 : onY ? 0.7 : 1.4)
+  );
   #else
   vec3 w = an * an * an * an;
   w /= w.x + w.y + w.z + 1e-6;
   float v = 0.0;
-  if (w.x > 0.01) v += w.x * crayonPlane(p.zy, a);
-  if (w.y > 0.01) v += w.y * crayonPlane(p.xz, a + 0.7);
-  if (w.z > 0.01) v += w.z * crayonPlane(p.xy, a + 1.4);
+  if (w.x > 0.01) v += w.x * crayonPlane(p.zy, dx.zy, dy.zy, a);
+  if (w.y > 0.01) v += w.y * crayonPlane(p.xz, dx.xz, dy.xz, a + 0.7);
+  if (w.z > 0.01) v += w.z * crayonPlane(p.xy, dx.xy, dy.xy, a + 1.4);
   return v / max(0.01, (w.x > 0.01 ? w.x : 0.0) + (w.y > 0.01 ? w.y : 0.0) + (w.z > 0.01 ? w.z : 0.0));
   #endif
 }
@@ -254,7 +268,9 @@ const fragmentMain = /* glsl */ `
   vec3 cn = vCrayonNormal;
   float wax = crayonWax(vCrayonPos, length(cn) > 0.0 ? normalize(cn) : vec3(0.0, 0.0, 1.0));
   float covered = smoothstep(0.2, 0.55, wax);
-  vec3 paper = mix(diffuseColor.rgb, uCrayonPaper, 0.6);
+  // Dark colours (the marquee's backing, eyes, tyres) stay dark: the paper barely shows through them.
+  float tone = dot(diffuseColor.rgb, vec3(0.2126, 0.7152, 0.0722));
+  vec3 paper = mix(diffuseColor.rgb, uCrayonPaper, mix(0.1, 0.6, smoothstep(0.01, 0.12, tone)));
   diffuseColor.rgb = mix(paper, diffuseColor.rgb * (0.82 + 0.3 * wax), covered);
 }
 `;

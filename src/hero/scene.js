@@ -112,7 +112,7 @@ const LIGHT_BEAM = {
  * The solid parts (not flat shapes, which have no inside) also make up the
  * mesh's ink outline hull (userData.hull, drawn by crayon.js).
  */
-class Batch {
+export class Batch {
   /** @type {BufferGeometry[]} */
   parts = [];
   /** @type {BufferGeometry[]} */
@@ -1155,8 +1155,9 @@ function crowd(count, paparazzi, random) {
       s.set(f.h, f.h, f.h);
       body.setMatrixAt(i, m.compose(p.set(f.x, hop, f.z), q, s));
       head.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.55 * f.h, f.z), q, s));
-      const armsUp = f.arms || f.camera ? 1 : 0.0001;
-      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.15 * f.h, f.z), q, s.set(f.h, f.h * armsUp, f.h)));
+      // Arms down are hidden whole (scale 0): a squashed strip would still get an outline.
+      const armsUp = f.arms || f.camera ? f.h : 0;
+      arms.setMatrixAt(i, m.compose(p.set(f.x, hop + 1.15 * f.h, f.z), q, s.set(armsUp, armsUp, armsUp)));
       if (f.phone || f.camera) {
         const lift = f.camera ? 1.62 : 1.9 + 0.25 * Math.sin(t * 1.3 + f.phase);
         p.set(f.x + Math.sin(f.ry) * 0.38, hop + lift * f.h, f.z + Math.cos(f.ry) * 0.38);

@@ -1,4 +1,4 @@
-import { BoxGeometry, Color, InstancedMesh, Mesh, Texture, Vector3 } from 'three';
+import { BoxGeometry, Color, InstancedMesh, Mesh, Shape, ShapeGeometry, Texture, Vector2, Vector3 } from 'three';
 import { describe, expect, it } from 'vitest';
 import {
   BOIL_FPS,
@@ -21,7 +21,7 @@ import {
   pickQuality,
   rng,
 } from '../src/hero/quality.js';
-import { EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
+import { Batch, EYE, REVOLUTION, STILL_T, buildScene, glowMaterial } from '../src/hero/scene.js';
 
 const desktop = pickQuality({ width: 1440, devicePixelRatio: 2 });
 const phone = pickQuality({ width: 390, devicePixelRatio: 3, coarsePointer: true });
@@ -482,10 +482,17 @@ describe('crayon on the models', () => {
     kit.setSize(1920, 1080, 1.5);
     expect(kit.outline.uniforms.uRes.value.toArray()).toEqual([1920, 1080]);
     expect(kit.outline.uniforms.uWidth.value).toBeCloseTo(OUTLINE_PX * 1.5);
-    // Flat shapes (bunting, stars) have no inside, so they're left out of the hulls.
-    const flat = new Mesh();
+    // A box's hull is welded at the corners, so pushing it out along the normals closes it up.
     expect(hullGeometry(new BoxGeometry(1, 1, 1)).getAttribute('position').count).toBe(8);
-    expect(flat.userData.hull).toBeUndefined();
+    // Flat shapes (bunting, stars) have no inside, so they're left out of the hulls.
+    const triangle = () => new ShapeGeometry(new Shape([new Vector2(0, 0), new Vector2(1, 0), new Vector2(0.5, 1)]));
+    const flat = new Batch();
+    flat.add(triangle(), '#FF0000');
+    expect(flat.mesh().userData.hull).toBeUndefined();
+    const mixed = new Batch();
+    mixed.add(triangle(), '#FF0000');
+    mixed.box(1, 1, 1, '#00FF00', 0, 0, 0);
+    expect(mixed.mesh().userData.hull.getAttribute('position').count).toBe(8);
     kit.dispose();
   });
 
