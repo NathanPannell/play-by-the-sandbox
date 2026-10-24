@@ -1583,7 +1583,7 @@ function crowdBody(low) {
 }
 
 /** The eyes, the same on everyone: small solid dots, a little taller than wide, with no outline. */
-const EYE_INK = '#3A2A30';
+const EYE_INK = INK;
 
 /**
  * A crowd member's head on its neck: the instance colour is the skin; the eyes
