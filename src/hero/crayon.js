@@ -51,7 +51,7 @@ export const BOIL_VARIANTS = 4;
 /** One tile of the stroke texture covers this much of a surface, in metres. */
 export const STROKE_TILE = 1.6;
 /** The ink outline's width on screen, in CSS pixels. */
-export const OUTLINE_PX = 1.7;
+export const OUTLINE_PX = 2;
 /** The stroke texture's size in texels (square, tileable). */
 export const TEXTURE_SIZE = 256;
 

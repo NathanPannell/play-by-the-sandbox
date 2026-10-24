@@ -441,6 +441,8 @@ describe('crayon on the models', () => {
       expect(shader.fragmentShader).toMatch(/#include <color_fragment>\n[\s\S]*diffuseColor\.rgb = mix\(paper/);
       expect(Object.keys(shader.uniforms)).toEqual(['tCrayon', 'uCrayonVariant', 'uCrayonPaper']);
       expect(Boolean(material.defines?.CRAYON_LITE)).toBe(quality.lite);
+      // Every crayon material shares one compiled program per tier.
+      expect(material.customProgramCacheKey()).toBe(quality.lite ? 'crayon-lite' : 'crayon');
       kit.dispose();
     }
   });
@@ -455,6 +457,20 @@ describe('crayon on the models', () => {
     expect(hulls.length).toBeGreaterThan(10);
     for (const hull of hulls) {
       expect(hull.material).toBe(kit.outline);
+      if (/** @type {InstancedMesh} */ (hull.parent).isInstancedMesh) {
+        // The hull draws as many instances as its crowd does.
+        const crowd = /** @type {InstancedMesh} */ (hull.parent);
+        crowd.count = Math.max(1, crowd.count - 1);
+        hull.onBeforeRender(
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+          /** @type {any} */ (null),
+        );
+        expect(/** @type {InstancedMesh} */ (hull).count).toBe(crowd.count);
+      }
       if (/** @type {InstancedMesh} */ (hull.parent).isInstancedMesh)
         expect(/** @type {InstancedMesh} */ (hull).instanceMatrix).toBe(
           /** @type {InstancedMesh} */ (hull.parent).instanceMatrix,
