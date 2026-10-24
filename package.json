@@ -19,7 +19,6 @@
     "poster": "node tools/make-poster.mjs",
     "flicker": "node tools/flicker.mjs",
     "icons": "node tools/make-icons.mjs",
-    "seams": "node tools/seams.mjs",
     "perf": "node tools/perf.mjs"
   },
   "dependencies": {
